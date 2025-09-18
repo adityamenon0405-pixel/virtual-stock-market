@@ -7,7 +7,7 @@ import plotly.express as px
 # -----------------------------
 # CONFIGURE YOUR BACKEND URL
 # -----------------------------
-API_URL = "https://virtual-stock-market-7mxp.onrender.com"  # Replace with your deployed backend URL
+API_URL = "https://virtual-stock-backend.onrender.com"  # Replace with your deployed backend URL
 
 st.set_page_config(page_title="Virtual Stock Market", layout="wide")
 
@@ -16,6 +16,8 @@ st.set_page_config(page_title="Virtual Stock Market", layout="wide")
 # -----------------------------
 if "username" not in st.session_state:
     st.session_state.username = ""
+if "rerun_flag" not in st.session_state:
+    st.session_state.rerun_flag = False
 
 stocks_list = ["TATA", "RELIANCE", "INFY", "ADANI", "HDFC"]
 
@@ -33,7 +35,8 @@ if st.session_state.username == "":
         res = requests.post(f"{API_URL}/register", json={"username": username})
         if res.status_code in [200, 400]:
             st.session_state.username = username
-            st.experimental_rerun()
+            # Force Streamlit rerun
+            st.session_state.rerun_flag = not st.session_state.rerun_flag
         else:
             st.error("Could not register")
 else:
@@ -146,5 +149,4 @@ else:
     # REFRESH EVERY 10 SECONDS
     # -----------------------------
     time.sleep(10)
-    st.experimental_rerun()
-
+    st.session_state.rerun_flag = not st.session_state.rerun_flag
