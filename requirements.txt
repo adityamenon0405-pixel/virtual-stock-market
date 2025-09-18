@@ -1,5 +1,9 @@
+# Backend dependencies
 flask
 gunicorn
+
+# Frontend dependencies
 streamlit
 requests
 pandas
+plotly
