@@ -7,7 +7,7 @@ import plotly.express as px
 # -----------------------------
 # CONFIGURE YOUR BACKEND URL
 # -----------------------------
-API_URL = "https://virtual-stock-backend.onrender.com"  # Replace with your deployed backend URL
+API_URL = "https://virtual-stock-market-7mxp.onrender.com"  # Replace with your deployed backend URL
 
 st.set_page_config(page_title="Virtual Stock Market", layout="wide")
 
@@ -150,3 +150,4 @@ else:
     # -----------------------------
     time.sleep(10)
     st.session_state.rerun_flag = not st.session_state.rerun_flag
+
