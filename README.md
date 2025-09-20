@@ -1,27 +1,23 @@
+# 🎯 Virtual Stock Market (Event Edition)
 
-## Deployment Instructions
+This is a **simulated stock market game** built with **Streamlit (frontend)** and **Flask (backend)**.  
+It gives each participant ₹1,00,000 virtual cash 💰 and lets them trade stocks in real time 📈.  
+Stock prices update automatically every minute, and a **30-minute timer** ends the session ⏱️.  
 
-### Backend (Flask)
-1. Deploy `backend.py` on [Render](https://render.com) or [Railway](https://railway.app)
-2. Start command: `gunicorn backend:app`
-3. Copy the public backend URL (e.g., `https://your-backend-service.onrender.com`)
+---
 
-### Frontend (Streamlit)
-1. Update `API_URL` in `frontend.py` with your backend URL
-2. Push `frontend.py` and `requirements.txt` to GitHub
-3. Deploy on [Streamlit Community Cloud](https://share.streamlit.io)
+## 🚀 Features
+✅ Virtual cash (₹1,00,000 per user)  
+✅ Buy/Sell random company stocks  
+✅ Auto-updating prices every minute  
+✅ Live leaderboard 🏆  
+✅ Session ends automatically after 30 minutes  
 
-## Dependencies
-- flask
-- gunicorn
-- streamlit
-- requests
-- pandas
-- plotly
+---
 
-## How to Use
-1. Open the frontend app
-2. Enter your username and register/login
-3. Buy and sell stocks
-4. Monitor portfolio and leaderboard
-5. Watch live charts update every 10 seconds
+## 🛠️ Installation & Setup
+
+### 1️⃣ Clone this Repository
+```bash
+git clone https://github.com/YOUR-USERNAME/virtual-stock-market.git
+cd virtual-stock-market
