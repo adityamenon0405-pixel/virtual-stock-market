@@ -1,5 +1,5 @@
-fastapi==0.111.1
-uvicorn[standard]==0.23.1
-httpx==0.26.0
-pydantic==2.5.1
-gunicorn==22.1.0
+fastapi
+uvicorn
+pydantic
+httpx
+apscheduler
