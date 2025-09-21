@@ -174,7 +174,6 @@ def get_leaderboard(limit:int=10):
 async def get_news(symbols: Optional[str]=None, q: Optional[str]=None):
     query = q or symbols or "stock market"
     articles = []
-    # include last 5 admin-injected news
     if injected_news:
         articles.extend(injected_news[-5:])
     if NEWSAPI_KEY:
