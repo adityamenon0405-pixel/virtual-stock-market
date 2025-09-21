@@ -1,11 +1,9 @@
-# backend/main.py
 import asyncio
 import random
 import time
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, Optional
-import uvicorn
 import os
 import httpx
 
@@ -211,7 +209,3 @@ def admin_news(title: str, description: str="", source: str="Admin", secret: str
     article = {"title":title,"description":description,"source":source,"publishedAt":time.ctime()}
     injected_news.append(article)
     return {"status":"ok","article":article}
-
-# --- Run server locally ---
-if __name__=="__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
