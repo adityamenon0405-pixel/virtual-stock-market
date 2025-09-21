@@ -9,14 +9,12 @@ import httpx
 
 app = FastAPI(title="Simulated Stock Market API with Admin Features")
 
-# --- Config ---
 STARTING_CASH = 100000
 UPDATE_MIN = 60
 UPDATE_MAX = 120
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "supersecret123")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")  # optional
 
-# --- In-memory state ---
 class TickerState(BaseModel):
     symbol: str
     name: str
@@ -25,10 +23,9 @@ class TickerState(BaseModel):
     last_update: float
 
 tickers: Dict[str, TickerState] = {}
-portfolios: Dict[str, dict] = {}  # id -> {name, cash, holdings}
-injected_news: list = []  # admin news
+portfolios: Dict[str, dict] = {}
+injected_news: list = []
 
-# Sample tickers
 INITIAL_TICKERS = {
     "ACME": "Acme Corp",
     "ORCL": "Oracle-ish",
@@ -42,14 +39,12 @@ INITIAL_TICKERS = {
     "SOLA": "Sola Energy"
 }
 
-# --- Initialize tickers ---
 def init_tickers():
     now = time.time()
     for s, n in INITIAL_TICKERS.items():
         price = round(random.uniform(50, 500), 2)
         tickers[s] = TickerState(symbol=s, name=n, price=price, prev_close=price, last_update=now)
 
-# --- Background simulation ---
 async def simulate_ticker(symbol: str):
     while True:
         await asyncio.sleep(random.randint(UPDATE_MIN, UPDATE_MAX))
@@ -74,7 +69,6 @@ async def startup_event():
     init_tickers()
     asyncio.create_task(start_simulators())
 
-# --- Models ---
 class RegisterIn(BaseModel):
     name: str
 
@@ -83,7 +77,6 @@ class TradeIn(BaseModel):
     symbol: str
     qty: int
 
-# --- Public Endpoints ---
 @app.get("/tickers")
 def get_tickers():
     return [t.dict() for t in tickers.values()]
@@ -124,13 +117,12 @@ def trade(t: TradeIn):
     p = portfolios[t.portfolio_id]
     price = tickers[t.symbol].price
     total = round(price * abs(t.qty), 2)
-
-    if t.qty > 0:  # buy
+    if t.qty > 0:
         if p["cash"] < total:
             raise HTTPException(status_code=400, detail="Insufficient cash")
         p["cash"] -= total
         p["holdings"][t.symbol] = p["holdings"].get(t.symbol,0) + t.qty
-    else:  # sell
+    else:
         available = p["holdings"].get(t.symbol,0)
         need = abs(t.qty)
         if available < need:
@@ -191,7 +183,6 @@ async def get_news(symbols: Optional[str]=None, q: Optional[str]=None):
         articles.append({"title":f"{query}: Market reacts to news","source":"SimNews","publishedAt":time.ctime()})
     return {"query":query,"articles":articles[-8:]}
 
-# --- Admin Endpoints ---
 @app.post("/admin/reset")
 def admin_reset(secret: str = Query(...)):
     if secret != ADMIN_SECRET:
