@@ -9,4 +9,6 @@ requests
 streamlit
 requests
 pandas
+plotly
+
 
