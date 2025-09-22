@@ -4,15 +4,20 @@ import json
 import os
 import pandas as pd
 import plotly.express as px
+import time
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # Backend URL from environment variable or default
-BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
+BACKEND = os.environ.get("BACKEND", "https://your-render-backend.onrender.com")
 
 # ---- Session State ----
 if "team" not in st.session_state:
     st.session_state.team = None
+if "round_start" not in st.session_state:
+    st.session_state.round_start = time.time()  # timestamp when participant enters
+
+ROUND_DURATION = 15 * 60  # 15 minutes
 
 # ---- Utility Functions ----
 def fetch_stocks():
@@ -51,18 +56,31 @@ if st.session_state.team is None:
             if res:
                 st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
+                st.session_state.round_start = time.time()
             else:
                 # If creation failed, try to fetch portfolio (login)
                 port = fetch_portfolio(team_name_input)
                 if port:
                     st.info(f"Team '{team_name_input}' already exists. Logged in successfully.")
                     st.session_state.team = team_name_input
+                    st.session_state.round_start = time.time()
                 else:
                     st.error("Error occurred. Try another team name.")
     st.stop()  # Stop execution until team is registered/logged in
 
 # ---- Main Dashboard ----
 team_name = st.session_state.team
+
+# ---- Countdown Timer ----
+elapsed = time.time() - st.session_state.round_start
+remaining = ROUND_DURATION - elapsed
+if remaining <= 0:
+    st.warning("⏹️ Trading round has ended!")
+    trading_allowed = False
+else:
+    mins, secs = divmod(int(remaining), 60)
+    st.info(f"⏱️ Time Remaining: {mins:02d}:{secs:02d}")
+    trading_allowed = True
 
 # ---- Fetch Data ----
 try:
@@ -88,25 +106,31 @@ if portfolio:
 
     # ---- Buy/Sell Form ----
     st.subheader("💸 Place Trade")
-    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2,2,1,1])
     with col1:
         selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
     with col2:
         qty = st.number_input("Quantity", min_value=1, step=1, value=1)
     with col3:
         if st.button("Buy"):
-            res = trade(team_name, selected_stock, int(qty))
-            if res:
-                st.success(f"✅ Bought {qty} of {selected_stock}")
+            if trading_allowed:
+                res = trade(team_name, selected_stock, int(qty))
+                if res:
+                    st.success(f"✅ Bought {qty} of {selected_stock}")
+                else:
+                    st.error("Failed to buy. Check cash balance.")
             else:
-                st.error("Failed to buy. Check cash balance.")
+                st.warning("Trading round has ended!")
     with col4:
         if st.button("Sell"):
-            res = trade(team_name, selected_stock, -int(qty))
-            if res:
-                st.success(f"✅ Sold {qty} of {selected_stock}")
+            if trading_allowed:
+                res = trade(team_name, selected_stock, -int(qty))
+                if res:
+                    st.success(f"✅ Sold {qty} of {selected_stock}")
+                else:
+                    st.error("Failed to sell. Check holdings.")
             else:
-                st.error("Failed to sell. Check holdings.")
+                st.warning("Trading round has ended!")
 else:
     st.warning("Portfolio not found. Try creating a new team.")
 
