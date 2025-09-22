@@ -6,14 +6,12 @@ import pandas as pd
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-# Backend URL from environment variable or default to Render backend
+# Backend URL from environment variable or default to Render URL
 BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
-# Initialize session state
+# ---- Session State ----
 if "team" not in st.session_state:
     st.session_state.team = None
-if "refresh" not in st.session_state:
-    st.session_state.refresh = False
 
 # ---- Utility Functions ----
 def fetch_stocks():
@@ -39,19 +37,19 @@ def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
 
-# ---- Starting Page: Team Registration ----
+# ---- Starting Page Registration ----
 if st.session_state.team is None:
     st.title("👥 Register Your Team")
-    team_name = st.text_input("Enter Team Name")
+    team_name_input = st.text_input("Enter Team Name")
     if st.button("Create Team"):
-        if team_name.strip() == "":
+        if team_name_input.strip() == "":
             st.warning("Please enter a valid team name.")
         else:
-            res = init_team(team_name)
+            res = init_team(team_name_input)
             if res:
-                st.success(f"Team '{team_name}' created with ₹{res['cash']:.2f}")
-                st.session_state.team = team_name
-                st.experimental_rerun()
+                st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
+                st.session_state.team = team_name_input
+                st.experimental_rerun()  # Actually unnecessary, can remove
             else:
                 st.error("Team already exists or error occurred.")
     st.stop()  # Stop execution until team is registered
@@ -59,6 +57,7 @@ if st.session_state.team is None:
 # ---- Main Dashboard ----
 team_name = st.session_state.team
 
+# ---- Fetch Data ----
 try:
     stocks = fetch_stocks()
     leaderboard = fetch_leaderboard()
@@ -92,7 +91,6 @@ if portfolio:
             res = trade(team_name, selected_stock, int(qty))
             if res:
                 st.success(f"✅ Bought {qty} of {selected_stock}")
-                st.session_state.refresh = not st.session_state.refresh
             else:
                 st.error("Failed to buy. Check cash balance.")
     with col4:
@@ -100,14 +98,8 @@ if portfolio:
             res = trade(team_name, selected_stock, -int(qty))
             if res:
                 st.success(f"✅ Sold {qty} of {selected_stock}")
-                st.session_state.refresh = not st.session_state.refresh
             else:
                 st.error("Failed to sell. Check holdings.")
-
-    # Trigger rerun if refresh toggled
-    if st.session_state.refresh:
-        st.session_state.refresh = False
-        st.experimental_rerun()
 else:
     st.warning("Portfolio not found. Try creating a new team.")
 
