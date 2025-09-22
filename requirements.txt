@@ -1,5 +1,5 @@
+#backend
+
 fastapi
-uvicorn
-pydantic
-httpx
-apscheduler
+uvicorn[standard]
+requests
