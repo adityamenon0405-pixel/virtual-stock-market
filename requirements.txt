@@ -3,3 +3,10 @@
 fastapi
 uvicorn[standard]
 requests
+
+#frontend
+
+streamlit
+requests
+pandas
+
