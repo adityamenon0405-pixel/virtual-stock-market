@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import time
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
@@ -45,9 +44,6 @@ def init_team(team):
 def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
-
-# ---- Auto-refresh every 1 second ----
-st_autorefresh(interval=1000, key="timer_refresh")
 
 # ---- Team Registration ----
 if st.session_state.team is None:
@@ -244,3 +240,7 @@ if news.get("articles"):
         st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
     st.info("No news available right now.")
+
+# ---- Auto Refresh for Live Updates ----
+time.sleep(1)
+st.experimental_rerun()
