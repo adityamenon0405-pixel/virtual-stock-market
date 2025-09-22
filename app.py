@@ -6,8 +6,8 @@ import pandas as pd
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-# Backend URL from environment variable or default to Render URL
-BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
+# Backend URL from environment variable or default
+BACKEND = os.environ.get("BACKEND", "https://your-render-backend.onrender.com")
 
 # ---- Session State ----
 if "team" not in st.session_state:
@@ -37,7 +37,7 @@ def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
 
-# ---- Starting Page Registration ----
+# ---- Starting Page: Team Registration ----
 if st.session_state.team is None:
     st.title("👥 Register Your Team")
     team_name_input = st.text_input("Enter Team Name")
@@ -49,7 +49,6 @@ if st.session_state.team is None:
             if res:
                 st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
-                st.experimental_rerun()  # Actually unnecessary, can remove
             else:
                 st.error("Team already exists or error occurred.")
     st.stop()  # Stop execution until team is registered
@@ -97,38 +96,4 @@ if portfolio:
         if st.button("Sell"):
             res = trade(team_name, selected_stock, -int(qty))
             if res:
-                st.success(f"✅ Sold {qty} of {selected_stock}")
-            else:
-                st.error("Failed to sell. Check holdings.")
-else:
-    st.warning("Portfolio not found. Try creating a new team.")
-
-# ---- Stocks Section ----
-st.subheader("💹 Live Stock Prices")
-df = pd.DataFrame(stocks)
-if not df.empty:
-    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]].rename(columns={
-        "symbol": "Symbol",
-        "name": "Company",
-        "price": "Price",
-        "pct_change": "% Change"
-    }), use_container_width=True)
-else:
-    st.warning("No stock data available.")
-
-# ---- Leaderboard ----
-st.subheader("🏆 Leaderboard")
-if leaderboard:
-    ldf = pd.DataFrame(leaderboard)
-    st.dataframe(ldf, use_container_width=True)
-else:
-    st.info("No teams yet.")
-
-# ---- News ----
-st.subheader("📰 Market News")
-if news.get("articles"):
-    for article in news["articles"]:
-        st.markdown(f"🔗 [{article['title']}]({article['url']})")
-else:
-    st.info("No news available right now.")
+                st.success(f"✅ Sold {qty} o
