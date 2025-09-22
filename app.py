@@ -7,7 +7,7 @@ import pandas as pd
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # ✅ Backend URL from secret or fallback to Render URL
-BACKEND = os.environ.get("BACKEND", "https://your-render-backend.onrender.com")
+BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
 # ✅ Use st.query_params (no deprecation warning)
 params = st.query_params
@@ -131,3 +131,4 @@ if news.get("articles"):
         st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
     st.info("No news available right now.")
+
