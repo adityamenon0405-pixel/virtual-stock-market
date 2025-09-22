@@ -25,7 +25,6 @@ ROUND_DURATION = 15 * 60  # 15 minutes
 
 # ---- Utility Functions ----
 def fetch_json(url):
-    """Fetch JSON safely, return None if failed"""
     try:
         r = requests.get(url, timeout=6)
         r.raise_for_status()
@@ -43,31 +42,28 @@ def fetch_news():
     return fetch_json(f"{BACKEND}/news")
 
 def fetch_portfolio(team):
-    r = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6)
-    if r.status_code == 200:
-        try:
-            return r.json()
-        except ValueError:
-            return None
-    return None
+    try:
+        r = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6)
+        r.raise_for_status()
+        return r.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return None
 
 def init_team(team):
-    r = requests.post(f"{BACKEND}/init_team", json={"team": team})
-    if r.status_code == 200:
-        try:
-            return r.json()
-        except ValueError:
-            return None
-    return None
+    try:
+        r = requests.post(f"{BACKEND}/init_team", json={"team": team}, timeout=6)
+        r.raise_for_status()
+        return r.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return None
 
 def trade(team, symbol, qty):
-    r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
-    if r.status_code == 200:
-        try:
-            return r.json()
-        except ValueError:
-            return None
-    return None
+    try:
+        r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty}, timeout=6)
+        r.raise_for_status()
+        return r.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return None
 
 # ---- Team Registration ----
 if st.session_state.team is None:
@@ -90,41 +86,35 @@ if st.session_state.team is None:
                     st.session_state.round_start = time.time()
                 else:
                     st.error("Error occurred. Try another team name.")
-    st.stop()  # Wait until team is registered
+    st.stop()
 
 team_name = st.session_state.team
 
-# ---- Countdown Timer with Progress Bar ----
+# ---- Timer Display ----
 if st.session_state.round_start is None:
     st.session_state.round_start = time.time()
 
 elapsed = time.time() - st.session_state.round_start
-remaining = ROUND_DURATION - elapsed
-progress = max(0.0, remaining / ROUND_DURATION)
-st.progress(progress)
-
+remaining = max(0, ROUND_DURATION - elapsed)
 mins, secs = divmod(int(remaining), 60)
+
 if remaining <= 0:
-    st.warning("⏹️ Trading round has ended!")
     trading_allowed = False
-    st.progress(0.0)
+    st.warning("⏹️ Trading round has ended!")
 else:
     trading_allowed = True
-    if remaining <= 60:
-        st.markdown(f"<h3 style='color:red'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
-    elif remaining <= 300:
-        st.markdown(f"<h3 style='color:orange'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<h3 style='color:green'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
+    st.info(f"⏱️ Time Remaining: {mins:02d}:{secs:02d}")
 
-# ---- Fetch Data Safely ----
+# ---- Fetch Data with Retry Button ----
 stocks = fetch_stocks()
 leaderboard = fetch_leaderboard()
 news = fetch_news()
 portfolio = fetch_portfolio(team_name)
 
 if stocks is None or leaderboard is None or news is None or portfolio is None:
-    st.error("❌ Could not connect to backend or backend returned invalid data. Please check BACKEND URL and ensure the backend is running.")
+    st.error("❌ Could not connect to backend or backend returned invalid data.")
+    if st.button("🔄 Retry Fetching Data"):
+        st.experimental_rerun()
     st.stop()
 
 # ---- Portfolio Section ----
@@ -179,7 +169,7 @@ if st.session_state.sell_clicked:
 st.subheader("💹 Live Stock Prices")
 df = pd.DataFrame(stocks)
 if not df.empty:
-    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >=0 else "🔴")
+    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
     st.dataframe(df[["symbol","name","price","pct_change","Trend"]].rename(columns={
         "symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"
     }), use_container_width=True)
@@ -198,16 +188,11 @@ if not df.empty:
         title='Stock Price vs % Change vs Volume',
         labels={'price':'Price','pct_change':'% Change','volume':'Volume'}
     )
-    fig3d.update_layout(scene=dict(
-        xaxis_title='Price',
-        yaxis_title='% Change',
-        zaxis_title='Volume'
-    ))
     st.plotly_chart(fig3d, use_container_width=True)
 else:
     st.warning("No stock data available.")
 
-# ---- Animated Leaderboard ----
+# ---- Leaderboard ----
 st.subheader("🏆 Leaderboard (Live)")
 leaderboard_sorted = sorted(leaderboard, key=lambda x: x['portfolio_value'], reverse=True)
 teams = [t['team'] for t in leaderboard_sorted]
@@ -220,7 +205,7 @@ fig_table = go.Figure(data=[go.Table(
 st.plotly_chart(fig_table, use_container_width=True)
 
 # ---- Portfolio Surface Chart ----
-st.subheader("📈 Portfolio Value Surface Chart (Live)")
+st.subheader("📈 Portfolio Value Surface Chart")
 stock_symbols = [s['symbol'] for s in stocks]
 z_matrix = []
 for t in teams:
@@ -240,10 +225,9 @@ fig_surface = px.imshow(
     color_continuous_scale='Viridis',
     text_auto=True
 )
-fig_surface.update_yaxes(categoryorder='array', categoryarray=teams)
 st.plotly_chart(fig_surface, use_container_width=True)
 
-# ---- News Section ----
+# ---- Market News ----
 st.subheader("📰 Market News")
 if news.get("articles"):
     for article in news["articles"]:
@@ -251,6 +235,5 @@ if news.get("articles"):
 else:
     st.info("No news available right now.")
 
-# ---- Auto Refresh ----
-time.sleep(1)
-st.experimental_rerun()
+# ---- Manual Refresh ----
+st.button("🔄 Refresh Data (Manual)")
