@@ -8,7 +8,7 @@ import math
 
 st.set_page_config(page_title="Virtual Stock Market — Event", layout="wide")
 
-BACKEND = st.secrets.get("BACKEND_URL") or st.sidebar.text_input("Backend URL (eg https://your-backend.onrender.com)", value="http://localhost:8000")
+BACKEND = st.secrets.get("https://virtual-stock-market-7mxp.onrender.com") or st.sidebar.text_input("Backend URL (eg https://your-backend.onrender.com)", value="http://localhost:8000")
 
 st.title("📈 Virtual Stock Market — Live Dashboard")
 team = st.sidebar.text_input("Team name", value="Team-A")
@@ -128,3 +128,4 @@ if auto_refresh:
 # Footer
 st.markdown("---")
 st.markdown("Tip: Run multiple browser windows (or use the projector) to show the leaderboard to the audience.")
+
