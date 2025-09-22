@@ -3,18 +3,24 @@ import requests
 import os
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import time
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-# Backend URL from environment variable or default
+# ---- Backend URL ----
 BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
 # ---- Session State ----
 if "team" not in st.session_state:
     st.session_state.team = None
 if "round_start" not in st.session_state:
-    st.session_state.round_start = time.time()  # timestamp when participant enters
+    st.session_state.round_start = None
+if "buy_clicked" not in st.session_state:
+    st.session_state.buy_clicked = False
+if "sell_clicked" not in st.session_state:
+    st.session_state.sell_clicked = False
 
 ROUND_DURATION = 15 * 60  # 15 minutes
 
@@ -30,9 +36,7 @@ def fetch_news():
 
 def fetch_portfolio(team):
     r = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6)
-    if r.status_code == 200:
-        return r.json()
-    return None
+    return r.json() if r.status_code == 200 else None
 
 def init_team(team):
     r = requests.post(f"{BACKEND}/init_team", json={"team": team})
@@ -42,7 +46,10 @@ def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
 
-# ---- Starting Page: Team Registration / Login ----
+# ---- Auto-refresh every 1 second ----
+st_autorefresh(interval=1000, key="timer_refresh")
+
+# ---- Team Registration ----
 if st.session_state.team is None:
     st.title("👥 Register or Login Your Team")
     team_name_input = st.text_input("Enter Team Name")
@@ -50,14 +57,12 @@ if st.session_state.team is None:
         if team_name_input.strip() == "":
             st.warning("Please enter a valid team name.")
         else:
-            # Try to create team first
             res = init_team(team_name_input)
             if res:
                 st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
                 st.session_state.round_start = time.time()
             else:
-                # If creation failed, try to fetch portfolio (login)
                 port = fetch_portfolio(team_name_input)
                 if port:
                     st.info(f"Team '{team_name_input}' already exists. Logged in successfully.")
@@ -65,24 +70,33 @@ if st.session_state.team is None:
                     st.session_state.round_start = time.time()
                 else:
                     st.error("Error occurred. Try another team name.")
-    st.stop()  # Stop execution until team is registered/logged in
+    st.stop()  # Wait until team is registered
 
-# ---- Main Dashboard ----
 team_name = st.session_state.team
 
-# ---- Countdown Timer (Live with rerun) ----
+# ---- Countdown Timer with Progress Bar ----
+if st.session_state.round_start is None:
+    st.session_state.round_start = time.time()
+
 elapsed = time.time() - st.session_state.round_start
 remaining = ROUND_DURATION - elapsed
+progress = max(0.0, remaining / ROUND_DURATION)
 
+st.progress(progress)
+
+mins, secs = divmod(int(remaining), 60)
 if remaining <= 0:
     st.warning("⏹️ Trading round has ended!")
     trading_allowed = False
+    st.progress(0.0)
 else:
-    mins, secs = divmod(int(remaining), 60)
-    st.info(f"⏱️ Time Remaining: {mins:02d}:{secs:02d}")
     trading_allowed = True
-    time.sleep(1)               # wait for 1 second
-    st.experimental_rerun()     # rerun the app so timer updates
+    if remaining <= 60:
+        st.markdown(f"<h3 style='color:red'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
+    elif remaining <= 300:
+        st.markdown(f"<h3 style='color:orange'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<h3 style='color:green'>⏱️ Time Remaining: {mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
 
 # ---- Fetch Data ----
 try:
@@ -108,26 +122,20 @@ if portfolio:
 
     # ---- Buy/Sell Form ----
     st.subheader("💸 Place Trade")
-    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2,2,1,1])
     with col1:
         selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
     with col2:
         qty = st.number_input("Quantity", min_value=1, step=1, value=1)
 
-    # Initialize button states
-    if "buy_clicked" not in st.session_state:
-        st.session_state.buy_clicked = False
-    if "sell_clicked" not in st.session_state:
-        st.session_state.sell_clicked = False
-
     with col3:
-        if st.button("Buy"):
+        if st.button("Buy") and trading_allowed:
             st.session_state.buy_clicked = True
     with col4:
-        if st.button("Sell"):
+        if st.button("Sell") and trading_allowed:
             st.session_state.sell_clicked = True
 
-    # Process Buy once
+    # Process Buy
     if st.session_state.buy_clicked:
         if trading_allowed:
             res = trade(team_name, selected_stock, int(qty))
@@ -137,9 +145,9 @@ if portfolio:
                 st.error("Failed to buy. Check cash balance.")
         else:
             st.warning("Trading round has ended!")
-        st.session_state.buy_clicked = False   # reset
+        st.session_state.buy_clicked = False
 
-    # Process Sell once
+    # Process Sell
     if st.session_state.sell_clicked:
         if trading_allowed:
             res = trade(team_name, selected_stock, -int(qty))
@@ -149,8 +157,7 @@ if portfolio:
                 st.error("Failed to sell. Check holdings.")
         else:
             st.warning("Trading round has ended!")
-        st.session_state.sell_clicked = False   # reset
-
+        st.session_state.sell_clicked = False
 else:
     st.warning("Portfolio not found. Try creating a new team.")
 
@@ -158,17 +165,14 @@ else:
 st.subheader("💹 Live Stock Prices")
 df = pd.DataFrame(stocks)
 if not df.empty:
-    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]].rename(columns={
-        "symbol": "Symbol",
-        "name": "Company",
-        "price": "Price",
-        "pct_change": "% Change"
+    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >=0 else "🔴")
+    st.dataframe(df[["symbol","name","price","pct_change","Trend"]].rename(columns={
+        "symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"
     }), use_container_width=True)
 
-    # ---- 3D Scatter Chart ----
+    # ---- Dynamic 3D Scatter Chart ----
     st.subheader("📊 Stocks 3D Scatter Chart")
-    df['volume'] = [i * 1000 for i in range(1, len(df) + 1)]  # simulate volume
+    df['volume'] = [i*1000 for i in range(1, len(df)+1)]
     fig3d = px.scatter_3d(
         df,
         x='price',
@@ -178,31 +182,48 @@ if not df.empty:
         hover_name='name',
         size='price',
         size_max=20,
-        title='Stock Price vs % Change vs Volume'
+        title='Stock Price vs % Change vs Volume',
+        labels={'price':'Price','pct_change':'% Change','volume':'Volume'}
     )
+    fig3d.update_layout(scene=dict(
+        xaxis_title='Price',
+        yaxis_title='% Change',
+        zaxis_title='Volume'
+    ))
     st.plotly_chart(fig3d, use_container_width=True)
 else:
     st.warning("No stock data available.")
 
-# ---- Leaderboard ----
-st.subheader("🏆 Leaderboard")
+# ---- Animated Leaderboard ----
+st.subheader("🏆 Leaderboard (Live)")
 if leaderboard:
-    ldf = pd.DataFrame(leaderboard)
-    st.dataframe(ldf, use_container_width=True)
+    leaderboard_sorted = sorted(leaderboard, key=lambda x: x['portfolio_value'], reverse=True)
+    teams = [t['team'] for t in leaderboard_sorted]
+    values = [t['portfolio_value'] for t in leaderboard_sorted]
+
+    fig_table = go.Figure(data=[go.Table(
+        header=dict(values=["Team", "Portfolio Value"],
+                    fill_color='paleturquoise',
+                    align='left'),
+        cells=dict(values=[teams, [f"₹{v:,.2f}" for v in values]],
+                   fill_color='lavender',
+                   align='left'))
+    ])
+    st.plotly_chart(fig_table, use_container_width=True)
 
     # ---- Portfolio Surface Chart ----
-    st.subheader("📈 Portfolio Value Surface Chart")
-    teams = [t['team'] for t in leaderboard]
+    st.subheader("📈 Portfolio Value Surface Chart (Live)")
     stock_symbols = [s['symbol'] for s in stocks]
     z_matrix = []
     for t in teams:
         port = fetch_portfolio(t)
         row = []
         for s in stock_symbols:
-            qty = port['holdings'].get(s, {}).get('qty', 0)
-            price = port['holdings'].get(s, {}).get('price', 0)
-            row.append(qty * price)
+            qty = port['holdings'].get(s, {}).get('qty',0)
+            price = port['holdings'].get(s, {}).get('price',0)
+            row.append(qty*price)
         z_matrix.append(row)
+
     fig_surface = px.imshow(
         z_matrix,
         labels=dict(x="Stocks", y="Teams", color="Value"),
@@ -211,11 +232,12 @@ if leaderboard:
         color_continuous_scale='Viridis',
         text_auto=True
     )
+    fig_surface.update_yaxes(categoryorder='array', categoryarray=teams)
     st.plotly_chart(fig_surface, use_container_width=True)
 else:
     st.info("No teams yet.")
 
-# ---- News ----
+# ---- News Section ----
 st.subheader("📰 Market News")
 if news.get("articles"):
     for article in news["articles"]:
