@@ -3,6 +3,7 @@ import requests
 import json
 import os
 import pandas as pd
+import plotly.express as px
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
@@ -96,4 +97,77 @@ if portfolio:
         if st.button("Sell"):
             res = trade(team_name, selected_stock, -int(qty))
             if res:
-                st.success(f"✅ Sold {qty} o
+                st.success(f"✅ Sold {qty} of {selected_stock}")
+            else:
+                st.error("Failed to sell. Check holdings.")
+else:
+    st.warning("Portfolio not found. Try creating a new team.")
+
+# ---- Stocks Section ----
+st.subheader("💹 Live Stock Prices")
+df = pd.DataFrame(stocks)
+if not df.empty:
+    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
+    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]].rename(columns={
+        "symbol": "Symbol",
+        "name": "Company",
+        "price": "Price",
+        "pct_change": "% Change"
+    }), use_container_width=True)
+
+    # ---- 3D Scatter Chart ----
+    st.subheader("📊 Stocks 3D Scatter Chart")
+    df['volume'] = [i*1000 for i in range(1, len(df)+1)]  # simulate volume
+    fig3d = px.scatter_3d(
+        df,
+        x='price',
+        y='pct_change',
+        z='volume',
+        color='Trend',
+        hover_name='name',
+        size='price',
+        size_max=20,
+        title='Stock Price vs % Change vs Volume'
+    )
+    st.plotly_chart(fig3d, use_container_width=True)
+else:
+    st.warning("No stock data available.")
+
+# ---- Leaderboard ----
+st.subheader("🏆 Leaderboard")
+if leaderboard:
+    ldf = pd.DataFrame(leaderboard)
+    st.dataframe(ldf, use_container_width=True)
+
+    # ---- Portfolio Surface Chart ----
+    st.subheader("📈 Portfolio Value Surface Chart")
+    teams = [t['team'] for t in leaderboard]
+    stock_symbols = [s['symbol'] for s in stocks]
+    z_matrix = []
+    for t in teams:
+        port = fetch_portfolio(t)
+        row = []
+        for s in stock_symbols:
+            qty = port['holdings'].get(s, {}).get('qty', 0)
+            price = port['holdings'].get(s, {}).get('price', 0)
+            row.append(qty * price)
+        z_matrix.append(row)
+    fig_surface = px.imshow(
+        z_matrix,
+        labels=dict(x="Stocks", y="Teams", color="Value"),
+        x=stock_symbols,
+        y=teams,
+        color_continuous_scale='Viridis',
+        text_auto=True
+    )
+    st.plotly_chart(fig_surface, use_container_width=True)
+else:
+    st.info("No teams yet.")
+
+# ---- News ----
+st.subheader("📰 Market News")
+if news.get("articles"):
+    for article in news["articles"]:
+        st.markdown(f"🔗 [{article['title']}]({article['url']})")
+else:
+    st.info("No news available right now.")
