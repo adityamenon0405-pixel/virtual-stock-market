@@ -1,131 +1,133 @@
-# frontend/streamlit_app.py
 import streamlit as st
-import pandas as pd
 import requests
-import time
-from datetime import datetime
-import math
+import json
+import os
+import pandas as pd
 
-st.set_page_config(page_title="Virtual Stock Market — Event", layout="wide")
+st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-BACKEND = st.secrets.get("https://virtual-stock-market-7mxp.onrender.com") or st.sidebar.text_input("Backend URL (eg https://your-backend.onrender.com)", value="http://localhost:8000")
+# ✅ Backend URL from secret or fallback to Render URL
+BACKEND = os.environ.get("BACKEND", "https://your-render-backend.onrender.com")
 
-st.title("📈 Virtual Stock Market — Live Dashboard")
-team = st.sidebar.text_input("Team name", value="Team-A")
-if st.sidebar.button("Create team / reset (if new)"):
+# ✅ Use st.query_params (no deprecation warning)
+params = st.query_params
+
+# ---- Utility Functions ----
+def fetch_stocks():
+    return requests.get(f"{BACKEND}/stocks", timeout=6).json()
+
+def fetch_leaderboard():
+    return requests.get(f"{BACKEND}/leaderboard", timeout=6).json()
+
+def fetch_news():
+    return requests.get(f"{BACKEND}/news", timeout=6).json()
+
+def fetch_portfolio(team):
+    r = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6)
+    if r.status_code == 200:
+        return r.json()
+    return None
+
+def init_team(team):
     r = requests.post(f"{BACKEND}/init_team", json={"team": team})
-    st.sidebar.write(r.json())
+    return r.json() if r.status_code == 200 else None
 
-st.sidebar.write("Virtual cash: ₹100,000 per team")
+def trade(team, symbol, qty):
+    r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
+    return r.json() if r.status_code == 200 else None
 
-auto_refresh = st.sidebar.checkbox("Auto-refresh every 10s", value=True)
-refresh_interval = st.sidebar.number_input("Refresh interval (seconds)", min_value=5, max_value=60, value=10)
+# ---- Sidebar: Team Selection ----
+st.sidebar.title("👥 Team Setup")
+team_name = st.sidebar.text_input("Enter Team Name", value=params.get("team", [""])[0])
 
-# trading panel
-st.sidebar.subheader("Quick Trade")
-symbol = st.sidebar.text_input("Symbol (e.g. APPL)", value="APPL")
-qty = st.sidebar.number_input("Quantity (positive buy, negative sell)", value=1, step=1)
-if st.sidebar.button("Execute Trade"):
-    payload = {"team": team, "symbol": symbol.upper(), "qty": int(qty)}
-    try:
-        r = requests.post(f"{BACKEND}/trade", json=payload, timeout=8)
-        st.sidebar.write(r.json())
-    except Exception as e:
-        st.sidebar.error(str(e))
+if team_name:
+    st.query_params["team"] = team_name  # Persist in URL
+    if st.sidebar.button("Create Team / Reset"):
+        res = init_team(team_name)
+        if res:
+            st.sidebar.success(f"Team '{team_name}' initialized with ₹{res['cash']:.2f}")
+        else:
+            st.sidebar.warning("Team already exists or error occurred.")
+else:
+    st.sidebar.warning("Enter a team name to start.")
 
-# auto refresh helper
-if auto_refresh:
-    st_autorefresh = st.experimental_get_query_params().get("autorefresh", ["0"])[0]
-    # use st.experimental_rerun with timer
-    st.write("")  # placeholder
+# ---- Fetch Data ----
+try:
+    stocks = fetch_stocks()
+    leaderboard = fetch_leaderboard()
+    news = fetch_news()
+except requests.exceptions.RequestException as e:
+    st.error(f"❌ Could not connect to backend. Check BACKEND URL. Error: {e}")
+    st.stop()
 
+# ---- Portfolio Section ----
+if team_name:
+    portfolio = fetch_portfolio(team_name)
+    if portfolio:
+        st.subheader(f"📊 Portfolio for {team_name}")
+        st.metric("Total Portfolio Value", f"₹{portfolio['portfolio_value']:.2f}")
+        st.write(f"💵 **Cash:** ₹{portfolio['cash']:.2f}")
 
-def fetch_all():
-    stocks = requests.get(f"{BACKEND}/stocks", timeout=6).json()
-    portfolio = {}
-    try:
-        portfolio = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6).json()
-    except:
-        portfolio = {"error":"couldn't fetch portfolio"}
-    leaderboard = requests.get(f"{BACKEND}/leaderboard", timeout=6).json()
-    news = requests.get(f"{BACKEND}/news", timeout=6).json()
-    return stocks, portfolio, leaderboard, news
+        if portfolio["holdings"]:
+            holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
+            st.dataframe(holdings_df, use_container_width=True)
+        else:
+            st.info("No holdings yet. Buy some stocks!")
 
-stocks, portfolio, leaderboard, news = fetch_all()
+        # ---- Buy/Sell Form ----
+        st.subheader("💸 Place Trade")
+        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+        with col1:
+            selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
+        with col2:
+            qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+        with col3:
+            if st.button("Buy"):
+                res = trade(team_name, selected_stock, int(qty))
+                if res:
+                    st.success(f"✅ Bought {qty} of {selected_stock}")
+                    st.experimental_rerun()
+                else:
+                    st.error("Failed to buy. Check cash balance.")
+        with col4:
+            if st.button("Sell"):
+                res = trade(team_name, selected_stock, -int(qty))
+                if res:
+                    st.success(f"✅ Sold {qty} of {selected_stock}")
+                    st.experimental_rerun()
+                else:
+                    st.error("Failed to sell. Check holdings.")
+    else:
+        st.warning("Team not found. Click 'Create Team' in sidebar.")
+else:
+    st.info("👈 Enter a team name in the sidebar to view portfolio & trade.")
 
-# Stocks table with color coding
-st.subheader("Market — Live Prices")
+# ---- Stocks Section ----
+st.subheader("💹 Live Stock Prices")
 df = pd.DataFrame(stocks)
 if not df.empty:
-    df_display = df[["symbol","name","price","last_price","pct_change","updated_at"]].copy()
-    df_display["updated_at"] = df_display["updated_at"].apply(lambda t: datetime.fromtimestamp(t).strftime("%H:%M:%S"))
-    # Colorize pct_change column using HTML
-    def make_row_html(row):
-        pct = row["pct_change"]
-        color = "green" if pct > 0 else ("red" if pct < 0 else "black")
-        sign = "+" if pct > 0 else ""
-        return f"""<tr>
-<td><b>{row['symbol']}</b></td>
-<td>{row['name']}</td>
-<td>₹{row['price']}</td>
-<td>₹{row['last_price']}</td>
-<td style="color:{color}">{sign}{row['pct_change']}%</td>
-<td>{row['updated_at']}</td>
-</tr>"""
-    rows_html = "\n".join(df_display.apply(make_row_html, axis=1).tolist())
-    table_html = f"""
-    <table style="width:100%; border-collapse: collapse;">
-    <thead><tr><th>Symbol</th><th>Name</th><th>Price</th><th>Prev</th><th>% Change</th><th>Updated</th></tr></thead>
-    <tbody>{rows_html}</tbody>
-    </table>
-    """
-    st.markdown(table_html, unsafe_allow_html=True)
+    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
+    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]].rename(columns={
+        "symbol": "Symbol",
+        "name": "Company",
+        "price": "Price",
+        "pct_change": "% Change"
+    }), use_container_width=True)
 else:
-    st.write("No stocks found")
+    st.warning("No stock data available.")
 
-# Portfolio & holdings
-st.subheader(f"Your Portfolio — {team}")
-if "error" in portfolio:
-    st.error(portfolio["error"])
+# ---- Leaderboard ----
+st.subheader("🏆 Leaderboard")
+if leaderboard:
+    ldf = pd.DataFrame(leaderboard)
+    st.dataframe(ldf, use_container_width=True)
 else:
-    st.write(f"Cash: ₹{portfolio['cash']}")
-    st.write(f"Portfolio value (cash + holdings): ₹{portfolio['portfolio_value']}")
-    holdings = portfolio.get("holdings", {})
-    if holdings:
-        hold_df = pd.DataFrame([
-            {"symbol": s, "qty": d["qty"], "price": d["price"], "value": d["value"]}
-            for s,d in holdings.items()
-        ])
-        st.table(hold_df)
-    else:
-        st.write("No holdings yet")
+    st.info("No teams yet.")
 
-# Leaderboard
-st.subheader("Leaderboard")
-lb_df = pd.DataFrame(leaderboard)
-if not lb_df.empty:
-    lb_df.index = lb_df.index + 1
-    st.table(lb_df)
+# ---- News ----
+st.subheader("📰 Market News")
+if news.get("articles"):
+    for article in news["articles"]:
+        st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
-    st.write("No teams yet")
-
-# News
-st.subheader("Latest news")
-articles = news.get("articles", [])
-for a in articles:
-    title = a.get("title")
-    url = a.get("url")
-    source = a.get("source","")
-    if url:
-        st.markdown(f"- [{title}]({url}) — *{source}*")
-    else:
-        st.markdown(f"- {title}")
-
-# Auto-refresh loop
-if auto_refresh:
-    st.experimental_rerun()
-
-# Footer
-st.markdown("---")
-st.markdown("Tip: Run multiple browser windows (or use the projector) to show the leaderboard to the audience.")
-
+    st.info("No news available right now.")
