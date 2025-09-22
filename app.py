@@ -8,7 +8,7 @@ import plotly.express as px
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # Backend URL from environment variable or default
-BACKEND = os.environ.get("BACKEND", "https://your-render-backend.onrender.com")
+BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
 # ---- Session State ----
 if "team" not in st.session_state:
@@ -38,21 +38,28 @@ def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
 
-# ---- Starting Page: Team Registration ----
+# ---- Starting Page: Team Registration / Login ----
 if st.session_state.team is None:
-    st.title("👥 Register Your Team")
+    st.title("👥 Register or Login Your Team")
     team_name_input = st.text_input("Enter Team Name")
-    if st.button("Create Team"):
+    if st.button("Continue"):
         if team_name_input.strip() == "":
             st.warning("Please enter a valid team name.")
         else:
+            # Try to create team first
             res = init_team(team_name_input)
             if res:
                 st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
             else:
-                st.error("Team already exists or error occurred.")
-    st.stop()  # Stop execution until team is registered
+                # If creation failed, try to fetch portfolio (login)
+                port = fetch_portfolio(team_name_input)
+                if port:
+                    st.info(f"Team '{team_name_input}' already exists. Logged in successfully.")
+                    st.session_state.team = team_name_input
+                else:
+                    st.error("Error occurred. Try another team name.")
+    st.stop()  # Stop execution until team is registered/logged in
 
 # ---- Main Dashboard ----
 team_name = st.session_state.team
