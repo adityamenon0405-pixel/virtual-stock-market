@@ -6,11 +6,14 @@ import pandas as pd
 
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-# ✅ Backend URL from secret or fallback to Render URL
+# Backend URL from environment variable or default to Render backend
 BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
-# ✅ Use st.query_params (no deprecation warning)
-params = st.query_params
+# Initialize session state
+if "team" not in st.session_state:
+    st.session_state.team = None
+if "refresh" not in st.session_state:
+    st.session_state.refresh = False
 
 # ---- Utility Functions ----
 def fetch_stocks():
@@ -36,22 +39,26 @@ def trade(team, symbol, qty):
     r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
     return r.json() if r.status_code == 200 else None
 
-# ---- Sidebar: Team Selection ----
-st.sidebar.title("👥 Team Setup")
-team_name = st.sidebar.text_input("Enter Team Name", value=params.get("team", [""])[0])
-
-if team_name:
-    st.query_params["team"] = team_name  # Persist in URL
-    if st.sidebar.button("Create Team / Reset"):
-        res = init_team(team_name)
-        if res:
-            st.sidebar.success(f"Team '{team_name}' initialized with ₹{res['cash']:.2f}")
+# ---- Starting Page: Team Registration ----
+if st.session_state.team is None:
+    st.title("👥 Register Your Team")
+    team_name = st.text_input("Enter Team Name")
+    if st.button("Create Team"):
+        if team_name.strip() == "":
+            st.warning("Please enter a valid team name.")
         else:
-            st.sidebar.warning("Team already exists or error occurred.")
-else:
-    st.sidebar.warning("Enter a team name to start.")
+            res = init_team(team_name)
+            if res:
+                st.success(f"Team '{team_name}' created with ₹{res['cash']:.2f}")
+                st.session_state.team = team_name
+                st.experimental_rerun()
+            else:
+                st.error("Team already exists or error occurred.")
+    st.stop()  # Stop execution until team is registered
 
-# ---- Fetch Data ----
+# ---- Main Dashboard ----
+team_name = st.session_state.team
+
 try:
     stocks = fetch_stocks()
     leaderboard = fetch_leaderboard()
@@ -61,46 +68,48 @@ except requests.exceptions.RequestException as e:
     st.stop()
 
 # ---- Portfolio Section ----
-if team_name:
-    portfolio = fetch_portfolio(team_name)
-    if portfolio:
-        st.subheader(f"📊 Portfolio for {team_name}")
-        st.metric("Total Portfolio Value", f"₹{portfolio['portfolio_value']:.2f}")
-        st.write(f"💵 **Cash:** ₹{portfolio['cash']:.2f}")
+portfolio = fetch_portfolio(team_name)
+if portfolio:
+    st.subheader(f"📊 Portfolio for {team_name}")
+    st.metric("Total Portfolio Value", f"₹{portfolio['portfolio_value']:.2f}")
+    st.write(f"💵 **Cash:** ₹{portfolio['cash']:.2f}")
 
-        if portfolio["holdings"]:
-            holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
-            st.dataframe(holdings_df, use_container_width=True)
-        else:
-            st.info("No holdings yet. Buy some stocks!")
-
-        # ---- Buy/Sell Form ----
-        st.subheader("💸 Place Trade")
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
-        with col1:
-            selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
-        with col2:
-            qty = st.number_input("Quantity", min_value=1, step=1, value=1)
-        with col3:
-            if st.button("Buy"):
-                res = trade(team_name, selected_stock, int(qty))
-                if res:
-                    st.success(f"✅ Bought {qty} of {selected_stock}")
-                    st.experimental_rerun()
-                else:
-                    st.error("Failed to buy. Check cash balance.")
-        with col4:
-            if st.button("Sell"):
-                res = trade(team_name, selected_stock, -int(qty))
-                if res:
-                    st.success(f"✅ Sold {qty} of {selected_stock}")
-                    st.experimental_rerun()
-                else:
-                    st.error("Failed to sell. Check holdings.")
+    if portfolio["holdings"]:
+        holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
+        st.dataframe(holdings_df, use_container_width=True)
     else:
-        st.warning("Team not found. Click 'Create Team' in sidebar.")
+        st.info("No holdings yet. Buy some stocks!")
+
+    # ---- Buy/Sell Form ----
+    st.subheader("💸 Place Trade")
+    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+    with col1:
+        selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
+    with col2:
+        qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+    with col3:
+        if st.button("Buy"):
+            res = trade(team_name, selected_stock, int(qty))
+            if res:
+                st.success(f"✅ Bought {qty} of {selected_stock}")
+                st.session_state.refresh = not st.session_state.refresh
+            else:
+                st.error("Failed to buy. Check cash balance.")
+    with col4:
+        if st.button("Sell"):
+            res = trade(team_name, selected_stock, -int(qty))
+            if res:
+                st.success(f"✅ Sold {qty} of {selected_stock}")
+                st.session_state.refresh = not st.session_state.refresh
+            else:
+                st.error("Failed to sell. Check holdings.")
+
+    # Trigger rerun if refresh toggled
+    if st.session_state.refresh:
+        st.session_state.refresh = False
+        st.experimental_rerun()
 else:
-    st.info("👈 Enter a team name in the sidebar to view portfolio & trade.")
+    st.warning("Portfolio not found. Try creating a new team.")
 
 # ---- Stocks Section ----
 st.subheader("💹 Live Stock Prices")
@@ -131,4 +140,3 @@ if news.get("articles"):
         st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
     st.info("No news available right now.")
-
