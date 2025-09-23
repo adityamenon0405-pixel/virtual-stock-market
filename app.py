@@ -92,33 +92,32 @@ team_name = st.session_state.team
 st.success(f"👋 Welcome, **{team_name}**! Let's trade 🚀")
 st.divider()
 
+# ---------- ADMIN LOGIN ----------
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+
+with st.sidebar:
+    st.markdown("### 🔑 Organizer Login")
+    admin_password_input = st.text_input("Enter Admin Password", type="password")
+    if st.button("Login as Admin"):
+        if admin_password_input == "your_secure_password":  # CHANGE THIS PASSWORD
+            st.session_state.admin_logged_in = True
+            st.success("✅ Logged in as Admin")
+        else:
+            st.error("❌ Incorrect password.")
+
+    if st.session_state.admin_logged_in:
+        st.info("🛠 Organizer Mode Active")
+        if st.button("Logout"):
+            st.session_state.admin_logged_in = False
+
 # ---------- ORGANIZER PANEL ----------
-with st.expander("⚙️ Organizer Controls"):
-    st.write("Control the round timer here.")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("▶️ Start Round"):
-            st.session_state.round_start = time.time()
-            st.session_state.paused = False
-            st.success("✅ Round started.")
-    with col2:
-        if st.button("⏸ Pause Round"):
-            if st.session_state.round_start and not st.session_state.paused:
-                st.session_state.paused = True
-                st.session_state.pause_time = time.time()
-                st.info("⏸ Round paused.")
-    with col3:
-        if st.button("🔄 Resume Round"):
-            if st.session_state.paused:
-                paused_duration = time.time() - st.session_state.pause_time
-                st.session_state.round_start += paused_duration
-                st.session_state.paused = False
-                st.success("▶️ Round resumed.")
-    if st.button("♻️ Reset Round"):
-        st.session_state.round_start = None
-        st.session_state.paused = False
-        st.session_state.pause_time = 0
-        st.warning("Round reset. You must start again.")
+if st.session_state.admin_logged_in:
+    st.subheader("🛠 Organizer Panel")
+    # Put your start/stop round, reset teams, etc. buttons here
+else:
+    st.caption("🔒 Organizer panel is locked. Login as admin to access controls.")
+
 
 # ---------- TIMER ----------
 if st.session_state.round_start:
@@ -276,4 +275,5 @@ if news and "articles" in news and news["articles"]:
         st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
     st.info("No news available right now.") 
+
 
