@@ -1,240 +1,221 @@
+# app.py
 import streamlit as st
 import requests
+import time
 import os
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import time
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTORELOAD_AVAILABLE = True
+except:
+    AUTORELOAD_AVAILABLE = False
+
+# ---- Page Config ----
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
-# ---- Backend URL ----
+# ---- Custom Styling ----
+st.markdown("""
+    <style>
+    body {
+        background-color: #ffffff;
+        color: #000000;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    h1, h2, h3 {
+        font-weight: 700;
+    }
+    .big-timer {
+        font-size: 60px !important;
+        font-weight: 800 !important;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+    .stButton>button {
+        background: linear-gradient(135deg, #4cafef, #1976d2);
+        color: white;
+        font-weight: 600;
+        border-radius: 12px;
+        padding: 0.6em 1.2em;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        border: none;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(135deg, #64b5f6, #1565c0);
+    }
+    .news-item {
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        background: linear-gradient(180deg, #f8fafc, #ffffff);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .news-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+    .news-meta {
+        font-size: 12px;
+        color: #555555;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---- Config ----
 BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
+ROUND_DURATION = 15 * 60
+AUTO_REFRESH_MS = 5000
+
+if AUTORELOAD_AVAILABLE:
+    st_autorefresh(interval=AUTO_REFRESH_MS, key="app_refresh")
 
 # ---- Session State ----
 if "team" not in st.session_state:
-    st.session_state.team = None
-if "round_start" not in st.session_state:
-    st.session_state.round_start = None
-if "buy_clicked" not in st.session_state:
-    st.session_state.buy_clicked = False
-if "sell_clicked" not in st.session_state:
-    st.session_state.sell_clicked = False
+    st.session_state.team = ""
 
-ROUND_DURATION = 15 * 60  # 15 minutes
-
-# ---- Utility Functions ----
-def fetch_json(url):
+# ---- Utility ----
+def safe_get_json(url):
     try:
-        r = requests.get(url, timeout=6)
+        r = requests.get(url, timeout=5)
         r.raise_for_status()
         return r.json()
-    except (requests.exceptions.RequestException, ValueError):
+    except:
         return None
 
-def fetch_stocks():
-    return fetch_json(f"{BACKEND}/stocks")
-
-def fetch_leaderboard():
-    return fetch_json(f"{BACKEND}/leaderboard")
-
-def fetch_news():
-    return fetch_json(f"{BACKEND}/news")
-
-def fetch_portfolio(team):
+def safe_post(url, payload):
     try:
-        r = requests.get(f"{BACKEND}/portfolio/{team}", timeout=6)
+        r = requests.post(url, json=payload, timeout=5)
         r.raise_for_status()
         return r.json()
-    except (requests.exceptions.RequestException, ValueError):
-        return None
+    except:
+        return {"error": "Backend unavailable."}
 
-def init_team(team):
-    try:
-        r = requests.post(f"{BACKEND}/init_team", json={"team": team}, timeout=6)
-        r.raise_for_status()
-        return r.json()
-    except (requests.exceptions.RequestException, ValueError):
-        return None
+# ---- Team Login ----
+st.sidebar.title("👤 Team Login")
+team_name = st.sidebar.text_input("Enter Team Name", st.session_state.team)
+if st.sidebar.button("Join / Init Team"):
+    resp = safe_post(f"{BACKEND}/init_team", {"team": team_name})
+    if resp and "error" not in resp:
+        st.session_state.team = team_name
+        st.sidebar.success(f"✅ Joined as {team_name}")
+    else:
+        st.sidebar.error("❌ Could not connect to backend.")
 
-def trade(team, symbol, qty):
-    try:
-        r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty}, timeout=6)
-        r.raise_for_status()
-        return r.json()
-    except (requests.exceptions.RequestException, ValueError):
-        return None
-
-# ---- Team Registration ----
-if st.session_state.team is None:
-    st.title("👥 Register or Login Your Team")
-    team_name_input = st.text_input("Enter Team Name")
-    if st.button("Continue"):
-        if team_name_input.strip() == "":
-            st.warning("Please enter a valid team name.")
-        else:
-            res = init_team(team_name_input)
-            if res:
-                st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
-                st.session_state.team = team_name_input
-                st.session_state.round_start = time.time()
-            else:
-                port = fetch_portfolio(team_name_input)
-                if port:
-                    st.info(f"Team '{team_name_input}' already exists. Logged in successfully.")
-                    st.session_state.team = team_name_input
-                    st.session_state.round_start = time.time()
-                else:
-                    st.error("Error occurred. Try another team name.")
+if not st.session_state.team:
+    st.warning("Please enter your team name in the sidebar to continue.")
     st.stop()
 
-team_name = st.session_state.team
-
-# ---- Timer Display ----
-if st.session_state.round_start is None:
-    st.session_state.round_start = time.time()
-
-elapsed = time.time() - st.session_state.round_start
+# ---- Timer ----
+start_time = float(os.environ.get("ROUND_START", time.time()))
+elapsed = time.time() - start_time
 remaining = max(0, ROUND_DURATION - elapsed)
 mins, secs = divmod(int(remaining), 60)
 
+timer_color = "#28a745" if remaining > 300 else "#ff9800" if remaining > 60 else "#f44336"
+st.markdown(f"<h1 class='big-timer' style='color:{timer_color};'>⏱️ {mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+
 if remaining <= 0:
-    trading_allowed = False
-    st.warning("⏹️ Trading round has ended!")
-else:
-    trading_allowed = True
-    st.info(f"⏱️ Time Remaining: {mins:02d}:{secs:02d}")
-
-# ---- Fetch Data with Retry Button ----
-stocks = fetch_stocks()
-leaderboard = fetch_leaderboard()
-news = fetch_news()
-portfolio = fetch_portfolio(team_name)
-
-if stocks is None or leaderboard is None or news is None or portfolio is None:
-    st.error("❌ Could not connect to backend or backend returned invalid data.")
-    if st.button("🔄 Retry Fetching Data"):
-        st.experimental_rerun()
+    st.error("⏹️ Trading round has ended!")
     st.stop()
 
-# ---- Portfolio Section ----
-st.subheader(f"📊 Portfolio for {team_name}")
-st.metric("Total Portfolio Value", f"₹{portfolio['portfolio_value']:.2f}")
-st.write(f"💵 **Cash:** ₹{portfolio['cash']:.2f}")
+# ---- Fetch Data ----
+stocks = safe_get_json(f"{BACKEND}/stocks") or []
+portfolio = safe_get_json(f"{BACKEND}/portfolio/{st.session_state.team}") or {"cash": 0, "holdings": []}
+leaderboard = safe_get_json(f"{BACKEND}/leaderboard") or []
+news = safe_get_json(f"{BACKEND}/news")  # keep None if invalid so we can show helpful message
 
-if portfolio["holdings"]:
-    holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
-    st.dataframe(holdings_df, use_container_width=True)
+# ---- Portfolio ----
+st.markdown("## 💼 Portfolio")
+st.write(f"**Available Cash:** ₹{portfolio.get('cash', 0):,.2f}")
+
+if portfolio.get("holdings"):
+    df_holdings = pd.DataFrame(portfolio["holdings"])
+    st.dataframe(df_holdings, use_container_width=True, height=300)
 else:
-    st.info("No holdings yet. Buy some stocks!")
+    st.info("No holdings yet.")
 
-# ---- Buy/Sell Form ----
-st.subheader("💸 Place Trade")
-col1, col2, col3, col4 = st.columns([2,2,1,1])
-with col1:
-    selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
-with col2:
-    qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+# ---- Trade Section ----
+st.markdown("## 💹 Trade")
+if stocks:
+    df_stocks = pd.DataFrame(stocks)
+    st.dataframe(df_stocks, use_container_width=True, height=300)
 
-with col3:
-    if st.button("Buy") and trading_allowed:
-        st.session_state.buy_clicked = True
-with col4:
-    if st.button("Sell") and trading_allowed:
-        st.session_state.sell_clicked = True
+    selected_stock = st.selectbox("Select Stock", df_stocks["symbol"])
+    qty = st.number_input("Quantity", min_value=1, step=1)
 
-if st.session_state.buy_clicked:
-    if trading_allowed:
-        res = trade(team_name, selected_stock, int(qty))
-        if res:
-            st.success(f"✅ Bought {qty} of {selected_stock}")
-        else:
-            st.error("Failed to buy. Check cash balance.")
-    else:
-        st.warning("Trading round has ended!")
-    st.session_state.buy_clicked = False
-
-if st.session_state.sell_clicked:
-    if trading_allowed:
-        res = trade(team_name, selected_stock, -int(qty))
-        if res:
-            st.success(f"✅ Sold {qty} of {selected_stock}")
-        else:
-            st.error("Failed to sell. Check holdings.")
-    else:
-        st.warning("Trading round has ended!")
-    st.session_state.sell_clicked = False
-
-# ---- Stocks Section ----
-st.subheader("💹 Live Stock Prices")
-df = pd.DataFrame(stocks)
-if not df.empty:
-    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol","name","price","pct_change","Trend"]].rename(columns={
-        "symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"
-    }), use_container_width=True)
-
-    st.subheader("📊 Stocks 3D Scatter Chart")
-    df['volume'] = [i*1000 for i in range(1, len(df)+1)]
-    fig3d = px.scatter_3d(
-        df,
-        x='price',
-        y='pct_change',
-        z='volume',
-        color='Trend',
-        hover_name='name',
-        size='price',
-        size_max=20,
-        title='Stock Price vs % Change vs Volume',
-        labels={'price':'Price','pct_change':'% Change','volume':'Volume'}
-    )
-    st.plotly_chart(fig3d, use_container_width=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🟢 Buy"):
+            resp = safe_post(f"{BACKEND}/trade", {"team": st.session_state.team, "symbol": selected_stock, "qty": int(qty)})
+            if resp and "error" not in resp:
+                st.success(resp.get("message", f"Bought {qty} {selected_stock}"))
+            else:
+                st.error("❌ Trade failed. Check backend or balance.")
+    with c2:
+        if st.button("🔴 Sell"):
+            resp = safe_post(f"{BACKEND}/trade", {"team": st.session_state.team, "symbol": selected_stock, "qty": -int(qty)})
+            if resp and "error" not in resp:
+                st.success(resp.get("message", f"Sold {qty} {selected_stock}"))
+            else:
+                st.error("❌ Trade failed. Check backend or holdings.")
 else:
     st.warning("No stock data available.")
 
 # ---- Leaderboard ----
-st.subheader("🏆 Leaderboard (Live)")
-leaderboard_sorted = sorted(leaderboard, key=lambda x: x['portfolio_value'], reverse=True)
-teams = [t['team'] for t in leaderboard_sorted]
-values = [t['portfolio_value'] for t in leaderboard_sorted]
-
-fig_table = go.Figure(data=[go.Table(
-    header=dict(values=["Team", "Portfolio Value"], fill_color='paleturquoise', align='left'),
-    cells=dict(values=[teams, [f"₹{v:,.2f}" for v in values]], fill_color='lavender', align='left'))
-])
-st.plotly_chart(fig_table, use_container_width=True)
-
-# ---- Portfolio Surface Chart ----
-st.subheader("📈 Portfolio Value Surface Chart")
-stock_symbols = [s['symbol'] for s in stocks]
-z_matrix = []
-for t in teams:
-    port = fetch_portfolio(t)
-    row = []
-    for s in stock_symbols:
-        qty = port['holdings'].get(s, {}).get('qty',0)
-        price = port['holdings'].get(s, {}).get('price',0)
-        row.append(qty*price)
-    z_matrix.append(row)
-
-fig_surface = px.imshow(
-    z_matrix,
-    labels=dict(x="Stocks", y="Teams", color="Value"),
-    x=stock_symbols,
-    y=teams,
-    color_continuous_scale='Viridis',
-    text_auto=True
-)
-st.plotly_chart(fig_surface, use_container_width=True)
-
-# ---- Market News ----
-st.subheader("📰 Market News")
-if news.get("articles"):
-    for article in news["articles"]:
-        st.markdown(f"🔗 [{article['title']}]({article['url']})")
+st.markdown("## 🏆 Leaderboard")
+if leaderboard:
+    df = pd.DataFrame(leaderboard).sort_values(by="portfolio_value", ascending=False)
+    st.dataframe(df, use_container_width=True, height=350)
 else:
-    st.info("No news available right now.")
+    st.warning("No leaderboard data available.")
 
-# ---- Manual Refresh ----
-st.button("🔄 Refresh Data (Manual)")
+# ---- News Section (new) ----
+st.markdown("## 📰 Market News")
+if news is None:
+    st.error("News feed currently unavailable. Check backend /news endpoint.")
+else:
+    # Normalize different possible backend formats
+    if isinstance(news, dict):
+        articles = news.get("articles") or news.get("data") or []
+    elif isinstance(news, list):
+        articles = news
+    else:
+        articles = []
 
+    if not articles:
+        st.info("No news articles available right now.")
+    else:
+        # Show up to 6 articles
+        for art in articles[:6]:
+            # art may be dict with title,url,source,publishedAt,description
+            title = art.get("title") if isinstance(art, dict) else str(art)
+            url = art.get("url") if isinstance(art, dict) else None
+            source = art.get("source", {}).get("name") if isinstance(art.get("source", {}), dict) else art.get("source") if isinstance(art, dict) else None
+            desc = art.get("description") if isinstance(art, dict) else None
+            pub = art.get("publishedAt") if isinstance(art, dict) else None
+
+            st.markdown("<div class='news-item'>", unsafe_allow_html=True)
+            if url:
+                st.markdown(f"<div class='news-title'><a href='{url}' target='_blank'>{title}</a></div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='news-title'>{title}</div>", unsafe_allow_html=True)
+
+            meta_parts = []
+            if source:
+                meta_parts.append(f"{source}")
+            if pub:
+                meta_parts.append(f"{pub}")
+            if meta_parts:
+                st.markdown(f"<div class='news-meta'>{' • '.join(meta_parts)}</div>", unsafe_allow_html=True)
+            if desc:
+                st.markdown(f"<div style='margin-top:6px'>{desc}</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# ---- Footer / Status ----
+st.markdown("---")
+status_col1, status_col2 = st.columns([3,1])
+with status_col1:
+    st.write(f"Backend: `{BACKEND}` • Last fetch: {time.strftime('%H:%M:%S')}")
+with status_col2:
+    st.write(f"Auto-refresh: {'✅ every 5s' if AUTORELOAD_AVAILABLE else '❌ not installed'}")
