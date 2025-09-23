@@ -275,4 +275,5 @@ if news and "articles" in news and news["articles"]:
     for article in news["articles"]:
         st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
-    st.info("No news available right now.") In this code change the registrtion page as the first page 
+    st.info("No news available right now.") 
+
