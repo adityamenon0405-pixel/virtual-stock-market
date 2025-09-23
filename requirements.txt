@@ -7,8 +7,7 @@ requests
 #frontend
 
 streamlit
+streamlit-autorefresh
 requests
 pandas
 plotly
-
-
