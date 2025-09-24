@@ -114,7 +114,7 @@ with st.expander("⚙️ Organizer Controls"):
         st.session_state.pause_time = 0
         st.warning("Round reset. You must start again.")
 
-# ---------- TIMER ----------
+# ---------- TIMER WITH PROGRESS BAR ----------
 if st.session_state.round_start:
     if st.session_state.paused:
         elapsed = st.session_state.pause_time - st.session_state.round_start
@@ -123,22 +123,26 @@ if st.session_state.round_start:
 
     remaining = max(0, ROUND_DURATION - elapsed)
     mins, secs = divmod(int(remaining), 60)
-
-    if remaining <= 10:
-        color = "red"
-        blink = True
-    elif remaining <= 60:
-        color = "orange"
-        blink = False
-    else:
-        color = "green"
-        blink = False
+    progress = remaining / ROUND_DURATION
 
     if remaining <= 0:
         trading_allowed = False
         st.markdown("<h2 style='text-align:center; color:red;'>⏹️ Trading round has ended!</h2>", unsafe_allow_html=True)
+        st.progress(0)
     else:
         trading_allowed = True
+        # Color logic
+        if remaining <= 10:
+            color = "red"
+            blink = True
+        elif remaining <= 60:
+            color = "orange"
+            blink = False
+        else:
+            color = "green"
+            blink = False
+
+        # Blinking effect in last 10 seconds
         if blink:
             st.markdown(f"""
                 <h1 style='text-align:center; color:{color};
@@ -147,9 +151,13 @@ if st.session_state.round_start:
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"<h1 style='text-align:center; color:{color};'>⏱️ {mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+        
+        # Progress bar
+        st.progress(progress)
 else:
     trading_allowed = False
     st.markdown("<h3 style='text-align:center; color:orange;'>⌛ Waiting for round to start...</h3>", unsafe_allow_html=True)
+    st.progress(0)
 
 # ---------- FETCH DATA ----------
 stocks = fetch_stocks()
