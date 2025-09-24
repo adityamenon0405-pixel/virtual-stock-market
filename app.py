@@ -22,7 +22,7 @@ for key in ["team", "round_start", "paused", "pause_time", "buy_clicked", "sell_
         if key in ["buy_clicked", "sell_clicked", "paused"]:
             st.session_state[key] = False
         else:
-            st.session_state[key] = None if key=="team" or key=="round_start" else 0
+            st.session_state[key] = None if key in ["team", "round_start"] else 0
 
 ROUND_DURATION = 15 * 60  # 15 minutes
 
@@ -36,16 +36,16 @@ def safe_get(url, timeout=5):
         return None
 
 def fetch_stocks():
-    return safe_get(f"{BACKEND}/stocks")
+    return safe_get(f"{BACKEND}/stocks") or []
 
 def fetch_leaderboard():
-    return safe_get(f"{BACKEND}/leaderboard")
+    return safe_get(f"{BACKEND}/leaderboard") or []
 
 def fetch_news():
-    return safe_get(f"{BACKEND}/news")
+    return safe_get(f"{BACKEND}/news") or {"articles": []}
 
 def fetch_portfolio(team):
-    return safe_get(f"{BACKEND}/portfolio/{team}")
+    return safe_get(f"{BACKEND}/portfolio/{team}") or {"cash": 0, "holdings": {}}
 
 def init_team(team):
     try:
@@ -158,92 +158,103 @@ news = fetch_news()
 portfolio = fetch_portfolio(team_name)
 
 # ---------- PORTFOLIO ----------
-if portfolio:
-    st.subheader("💼 Portfolio")
-    st.metric("Available Cash", f"₹{portfolio['cash']:.2f}")
+st.subheader("💼 Portfolio")
+cash = portfolio.get("cash", 0)
+holdings = portfolio.get("holdings", {})
+st.metric("Available Cash", f"₹{cash:.2f}")
 
-    if portfolio["holdings"]:
-        holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
-        st.dataframe(holdings_df, use_container_width=True)
-    else:
-        st.info("No holdings yet. Buy some stocks!")
+if holdings:
+    holdings_df = pd.DataFrame.from_dict(holdings, orient="index")
+    st.dataframe(holdings_df, use_container_width=True)
+else:
+    st.info("No holdings yet. Buy some stocks!")
 
-    # ---------- TRADE ----------
-    st.subheader("💸 Place Trade")
-    if stocks:
-        col1, col2, col3, col4 = st.columns([2,2,1,1])
-        with col1:
-            selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
-        with col2:
-            qty = st.number_input("Quantity", min_value=1, step=1, value=1)
-        with col3:
-            if st.button("Buy"):
-                st.session_state.buy_clicked = True
-        with col4:
-            if st.button("Sell"):
-                st.session_state.sell_clicked = True
+# ---------- TRADE ----------
+st.subheader("💸 Place Trade")
+if stocks:
+    col1, col2, col3, col4 = st.columns([2,2,1,1])
+    with col1:
+        selected_stock = st.selectbox("Select Stock", [s.get("symbol","") for s in stocks])
+    with col2:
+        qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+    with col3:
+        if st.button("Buy"):
+            st.session_state.buy_clicked = True
+    with col4:
+        if st.button("Sell"):
+            st.session_state.sell_clicked = True
 
-        if st.session_state.buy_clicked:
-            if trading_allowed:
-                res = trade(team_name, selected_stock, int(qty))
-                if res:
-                    st.success(f"✅ Bought {qty} of {selected_stock}")
-                else:
-                    st.error("Failed to buy. Check cash balance.")
+    if st.session_state.buy_clicked:
+        if trading_allowed:
+            res = trade(team_name, selected_stock, int(qty))
+            if res:
+                st.success(f"✅ Bought {qty} of {selected_stock}")
             else:
-                st.warning("Trading round has ended!")
-            st.session_state.buy_clicked = False
+                st.error("Failed to buy. Check cash balance.")
+        else:
+            st.warning("Trading round has ended!")
+        st.session_state.buy_clicked = False
 
-        if st.session_state.sell_clicked:
-            if trading_allowed:
-                res = trade(team_name, selected_stock, -int(qty))
-                if res:
-                    st.success(f"✅ Sold {qty} of {selected_stock}")
-                else:
-                    st.error("Failed to sell. Check holdings.")
+    if st.session_state.sell_clicked:
+        if trading_allowed:
+            res = trade(team_name, selected_stock, -int(qty))
+            if res:
+                st.success(f"✅ Sold {qty} of {selected_stock}")
             else:
-                st.warning("Trading round has ended!")
-            st.session_state.sell_clicked = False
+                st.error("Failed to sell. Check holdings.")
+        else:
+            st.warning("Trading round has ended!")
+        st.session_state.sell_clicked = False
 
 # ---------- STOCKS ----------
+st.subheader("📊 Live Stock Prices")
 if stocks:
-    st.subheader("📊 Live Stock Prices")
     df = pd.DataFrame(stocks)
-    df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol","name","price","pct_change","Trend"]]
-                 .rename(columns={"symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"}), use_container_width=True)
+    if not df.empty:
+        df["Trend"] = df.get("pct_change", pd.Series([0]*len(df))).apply(lambda x: "🟢" if x >=0 else "🔴")
+        st.dataframe(df[["symbol","name","price","pct_change","Trend"]]
+                     .rename(columns={"symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"}), use_container_width=True)
 
-    # 3D Chart
-    df['volume'] = [i*1000 for i in range(1,len(df)+1)]
-    fig3d = px.scatter_3d(df, x='price', y='pct_change', z='volume', color='Trend', hover_name='name', size='price', size_max=18, opacity=0.8)
-    fig3d.update_traces(marker=dict(line=dict(width=1,color='DarkSlateGrey')))
-    fig3d.update_layout(scene=dict(xaxis_title="Price", yaxis_title="% Change", zaxis_title="Volume"), margin=dict(l=0,r=0,b=0,t=30))
-    st.plotly_chart(fig3d, use_container_width=True)
+        # 3D Chart
+        df['volume'] = [i*1000 for i in range(1,len(df)+1)]
+        fig3d = px.scatter_3d(df, x='price', y='pct_change', z='volume', color='Trend',
+                              hover_name='name', size='price', size_max=18, opacity=0.8)
+        fig3d.update_traces(marker=dict(line=dict(width=1,color='DarkSlateGrey')))
+        fig3d.update_layout(scene=dict(xaxis_title="Price", yaxis_title="% Change", zaxis_title="Volume"), margin=dict(l=0,r=0,b=0,t=30))
+        st.plotly_chart(fig3d, use_container_width=True)
 else:
     st.warning("No stock data available right now.")
 
 # ---------- LEADERBOARD ----------
 st.subheader("🏆 Live Leaderboard")
 if leaderboard:
-    ldf = pd.DataFrame(leaderboard).sort_values("value",ascending=False).reset_index(drop=True)
-    ldf.index += 1
-    def highlight_top3(row):
-        if row.name==1: return ['background-color: gold; font-weight:bold']*len(row)
-        elif row.name==2: return ['background-color: silver; font-weight:bold']*len(row)
-        elif row.name==3: return ['background-color: #cd7f32; font-weight:bold']*len(row)
-        else: return ['']*len(row)
-    st.dataframe(ldf.style.apply(highlight_top3, axis=1), use_container_width=True, hide_index=False)
+    if isinstance(leaderboard, list) and len(leaderboard) > 0:
+        ldf = pd.DataFrame(leaderboard)
+        if "value" in ldf.columns:
+            ldf = ldf.sort_values("value",ascending=False).reset_index(drop=True)
+            ldf.index += 1
+            def highlight_top3(row):
+                if row.name==1: return ['background-color: gold; font-weight:bold']*len(row)
+                elif row.name==2: return ['background-color: silver; font-weight:bold']*len(row)
+                elif row.name==3: return ['background-color: #cd7f32; font-weight:bold']*len(row)
+                else: return ['']*len(row)
+            st.dataframe(ldf.style.apply(highlight_top3, axis=1), use_container_width=True, hide_index=False)
+        else:
+            st.warning("Leaderboard data missing 'value'. Check backend API.")
+    else:
+        st.info("Leaderboard is empty.")
 else:
     st.info("No teams yet. Waiting for participants to trade...")
 
 # ---------- NEWS ----------
 st.subheader("📰 Market News")
-if news and "articles" in news and news["articles"]:
-    for article in news["articles"]:
+articles = news.get("articles", [])
+if articles:
+    for article in articles:
         st.markdown(f"""
         <div style='background-color:white;padding:10px;margin-bottom:8px;border-radius:8px;
         box-shadow:0 2px 6px rgba(0,0,0,0.1)'>
-            <b><a href="{article['url']}" target="_blank">{article['title']}</a></b><br>
+            <b><a href="{article.get('url','#')}" target="_blank">{article.get('title','No Title')}</a></b><br>
             <span style="color:gray;font-size:12px;">{datetime.now().strftime('%H:%M:%S')}</span>
         </div>
         """, unsafe_allow_html=True)
