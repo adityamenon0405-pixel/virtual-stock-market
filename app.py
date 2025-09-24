@@ -4,7 +4,9 @@ import requests
 import os
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import time
+from datetime import datetime
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
@@ -66,58 +68,56 @@ def trade(team, symbol, qty):
         return None
     return None
 
-# ---------- TEAM REGISTRATION (FIRST PAGE) ----------
+# ---------- TEAM REGISTRATION FIRST ----------
 if st.session_state.team is None:
     st.title("👥 Register or Login Your Team")
     team_name_input = st.text_input("Enter Team Name")
-    if st.button("Continue", type="primary"):
+    if st.button("Continue"):
         if team_name_input.strip() == "":
-            st.warning("⚠️ Please enter a valid team name.")
+            st.warning("Please enter a valid team name.")
         else:
             res = init_team(team_name_input)
             if res:
-                st.success(f"✅ Team **{team_name_input}** created with ₹{res['cash']:.2f}")
+                st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
             else:
                 port = fetch_portfolio(team_name_input)
                 if port:
-                    st.info(f"ℹ️ Team **{team_name_input}** logged in successfully.")
+                    st.info(f"Team '{team_name_input}' logged in successfully.")
                     st.session_state.team = team_name_input
                 else:
-                    st.error("❌ Error occurred. Try another team name.")
-
-    st.stop()  # 🚨 STOP execution until a team is registered/logged in
+                    st.error("Error occurred. Try another team name.")
+    st.stop()
 
 team_name = st.session_state.team
-st.success(f"👋 Welcome, **{team_name}**! Let's trade 🚀")
-st.divider()
-
-# ---------- ADMIN LOGIN ----------
-if "admin_logged_in" not in st.session_state:
-    st.session_state.admin_logged_in = False
-
-with st.sidebar:
-    st.markdown("### 🔑 Organizer Login")
-    admin_password_input = st.text_input("Enter Admin Password", type="password")
-    if st.button("Login as Admin"):
-        if admin_password_input == "your_secure_password":  # CHANGE THIS PASSWORD
-            st.session_state.admin_logged_in = True
-            st.success("✅ Logged in as Admin")
-        else:
-            st.error("❌ Incorrect password.")
-
-    if st.session_state.admin_logged_in:
-        st.info("🛠 Organizer Mode Active")
-        if st.button("Logout"):
-            st.session_state.admin_logged_in = False
 
 # ---------- ORGANIZER PANEL ----------
-if st.session_state.admin_logged_in:
-    st.subheader("🛠 Organizer Panel")
-    # Put your start/stop round, reset teams, etc. buttons here
-else:
-    st.caption("🔒 Organizer panel is locked. Login as admin to access controls.")
-
+with st.expander("⚙️ Organizer Controls"):
+    st.write("Control the round timer here.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("▶️ Start Round"):
+            st.session_state.round_start = time.time()
+            st.session_state.paused = False
+            st.success("✅ Round started.")
+    with col2:
+        if st.button("⏸ Pause Round"):
+            if st.session_state.round_start and not st.session_state.paused:
+                st.session_state.paused = True
+                st.session_state.pause_time = time.time()
+                st.info("⏸ Round paused.")
+    with col3:
+        if st.button("🔄 Resume Round"):
+            if st.session_state.paused:
+                paused_duration = time.time() - st.session_state.pause_time
+                st.session_state.round_start += paused_duration
+                st.session_state.paused = False
+                st.success("▶️ Round resumed.")
+    if st.button("♻️ Reset Round"):
+        st.session_state.round_start = None
+        st.session_state.paused = False
+        st.session_state.pause_time = 0
+        st.warning("Round reset. You must start again.")
 
 # ---------- TIMER ----------
 if st.session_state.round_start:
@@ -147,8 +147,7 @@ if st.session_state.round_start:
         if blink:
             st.markdown(f"""
                 <h1 style='text-align:center; color:{color};
-                animation: blinker 1s linear infinite;'>
-                ⏱️ {mins:02d}:{secs:02d}</h1>
+                animation: blinker 1s linear infinite;'>{mins:02d}:{secs:02d}</h1>
                 <style>@keyframes blinker {{ 50% {{ opacity: 0; }} }}</style>
             """, unsafe_allow_html=True)
         else:
@@ -156,14 +155,14 @@ if st.session_state.round_start:
 else:
     trading_allowed = False
     st.markdown("<h3 style='text-align:center; color:orange;'>⌛ Waiting for round to start...</h3>", unsafe_allow_html=True)
-    
+
 # ---------- FETCH DATA ----------
 stocks = fetch_stocks()
 leaderboard = fetch_leaderboard()
 news = fetch_news()
+portfolio = fetch_portfolio(team_name)
 
 # ---------- PORTFOLIO ----------
-portfolio = fetch_portfolio(team_name)
 if portfolio:
     st.subheader("💼 Portfolio")
     st.metric("Available Cash", f"₹{portfolio['cash']:.2f}")
@@ -217,9 +216,6 @@ if portfolio:
                 st.warning("Trading round has ended!")
             st.session_state.sell_clicked = False
 
-else:
-    st.warning("Portfolio not found. Try creating a new team.")
-
 # ---------- STOCKS ----------
 if stocks:
     st.subheader("📊 Live Stock Prices")
@@ -229,11 +225,20 @@ if stocks:
                  .rename(columns={"symbol": "Symbol", "name": "Company", "price": "Price", "pct_change": "% Change"}),
                  use_container_width=True)
 
-    # 3D Chart
+    # Attractive 3D Chart
     df['volume'] = [i * 1000 for i in range(1, len(df) + 1)]
-    fig3d = px.scatter_3d(df, x='price', y='pct_change', z='volume', color='Trend',
-                          hover_name='name', size='price', size_max=20,
-                          title='Stock Price vs % Change vs Volume')
+    fig3d = px.scatter_3d(
+        df, x='price', y='pct_change', z='volume',
+        color='Trend', hover_name='name', size='price',
+        size_max=18, opacity=0.8,
+        title='Stock Price vs % Change vs Volume'
+    )
+    fig3d.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+    fig3d.update_layout(scene=dict(
+        xaxis_title="Price",
+        yaxis_title="% Change",
+        zaxis_title="Volume"
+    ), margin=dict(l=0, r=0, b=0, t=30))
     st.plotly_chart(fig3d, use_container_width=True)
 else:
     st.warning("No stock data available right now.")
@@ -256,24 +261,22 @@ if leaderboard:
 
     styled_df = ldf.style.apply(highlight_top3, axis=1)
 
-    st.markdown("""
-        <style>
-        .scroll-table { max-height: 300px; overflow-y: auto; }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div class="scroll-table">', unsafe_allow_html=True)
     st.dataframe(styled_df, use_container_width=True, hide_index=False)
-    st.markdown('</div>', unsafe_allow_html=True)
 else:
     st.info("No teams yet. Waiting for participants to trade...")
 
 # ---------- NEWS ----------
+st.subheader("📰 Market News")
 if news and "articles" in news and news["articles"]:
-    st.subheader("📰 Market News")
     for article in news["articles"]:
-        st.markdown(f"🔗 [{article['title']}]({article['url']})")
+        st.markdown(
+            f"""
+            <div style='background-color:white;padding:10px;margin-bottom:8px;border-radius:8px;
+            box-shadow:0 2px 6px rgba(0,0,0,0.1)'>
+                <b><a href="{article['url']}" target="_blank">{article['title']}</a></b><br>
+                <span style="color:gray;font-size:12px;">{datetime.now().strftime('%H:%M:%S')}</span>
+            </div>
+            """, unsafe_allow_html=True
+        )
 else:
-    st.info("No news available right now.") 
-
-
+    st.info("No news available right now.")
