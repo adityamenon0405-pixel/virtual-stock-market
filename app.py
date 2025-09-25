@@ -10,7 +10,7 @@ import plotly.express as px
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # ---------- BACKEND ----------
-BACKEND = "https://your-backend-url.onrender.com"  # <-- change to your backend
+BACKEND = "https://virtual-stock-market-7mxp.onrender.com"  # <-- change to your backend
 
 # ---------- STYLING ----------
 st.markdown("""
