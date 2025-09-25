@@ -10,7 +10,7 @@ import threading
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # ---------- BACKEND ----------
-BACKEND = "https://your-backend-url.onrender.com"  # update this
+BACKEND = "https://virtual-stock-market-7mxp.onrender.com"  # update this
 
 # ---------- DARK THEME STYLING ----------
 st.markdown("""
@@ -228,3 +228,4 @@ with col2:
     else:
         st.info("No news available.")
     st.markdown("</div>", unsafe_allow_html=True)
+
