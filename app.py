@@ -10,9 +10,9 @@ import threading
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # ---------- BACKEND ----------
-BACKEND = "https://virtual-stock-market-7mxp.onrender.com"  # update to your backend
+BACKEND = "https://your-backend-url.onrender.com"  # update this
 
-# ---------- DARK THEME ----------
+# ---------- DARK THEME STYLING ----------
 st.markdown("""
 <style>
 body { background-color: #0D1117; color: #E6EDF3; }
@@ -27,7 +27,6 @@ body { background-color: #0D1117; color: #E6EDF3; }
 }
 .stDataFrame { background-color: #161B22 !important; color: #E6EDF3; }
 .metric-label, .metric-value { color: #E6EDF3 !important; }
-a { text-decoration: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,10 +39,8 @@ if "paused" not in st.session_state:
     st.session_state.paused = False
 if "timer_thread_started" not in st.session_state:
     st.session_state.timer_thread_started = False
-if "chart_thread_started" not in st.session_state:
-    st.session_state.chart_thread_started = False
 
-ROUND_DURATION = 15 * 60  # 15 min
+ROUND_DURATION = 15 * 60  # 15 min round
 
 # ---------- FETCH FUNCTIONS ----------
 @st.cache_data(ttl=5)
@@ -117,6 +114,7 @@ def run_timer():
             elapsed = st.session_state.pause_time - st.session_state.round_start
         else:
             elapsed = time.time() - st.session_state.round_start
+
         remaining = max(0, ROUND_DURATION - elapsed)
         mins, secs = divmod(int(remaining), 60)
         color = "#16A34A" if remaining > 60 else ("#FACC15" if remaining > 10 else "#F87171")
@@ -132,43 +130,36 @@ if st.session_state.round_start and not st.session_state.timer_thread_started:
     threading.Thread(target=run_timer, daemon=True).start()
     st.session_state.timer_thread_started = True
 
-# ---------- PLACEHOLDERS ----------
-chart_placeholder = st.empty()
-
-def update_3d_chart():
-    while True:
-        stocks = fetch_stocks()
-        if stocks:
-            df = pd.DataFrame(stocks)
-            df['Trend'] = df['pct_change'].apply(lambda x: "🟢" if x >= 0 else "🔴")
-            df['volume'] = [i*1000 for i in range(1,len(df)+1)]
-            fig3d = px.scatter_3d(
-                df, x='price', y='pct_change', z='volume',
-                color='Trend', hover_name='name', size='price', size_max=16,
-                opacity=0.8, title="Live Stock Market"
-            )
-            fig3d.update_layout(
-                scene=dict(xaxis_title="Price", yaxis_title="% Change", zaxis_title="Volume"),
-                template="plotly_dark",
-                margin=dict(l=0,r=0,b=0,t=30)
-            )
-            chart_placeholder.plotly_chart(fig3d, use_container_width=True)
-        time.sleep(3)
-
-if not st.session_state.chart_thread_started:
-    threading.Thread(target=update_3d_chart, daemon=True).start()
-    st.session_state.chart_thread_started = True
-
 # ---------- FETCH DATA ----------
 stocks = fetch_stocks()
 portfolio = fetch_portfolio(st.session_state.team)
 leaderboard = fetch_leaderboard()
 news = fetch_news()
 
-# ---------- UI ----------
+# ---------- UI LAYOUT ----------
 col1, col2 = st.columns([2,1])
 
+# --------- LEFT PANEL ---------
 with col1:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("📈 Live Stock Prices")
+    if stocks:
+        df = pd.DataFrame(stocks)
+        df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
+        st.dataframe(df[["symbol","name","price","pct_change","Trend"]]
+                     .rename(columns={"symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"}),
+                     use_container_width=True)
+        df['volume'] = [i*1000 for i in range(1,len(df)+1)]
+        fig3d = px.scatter_3d(df, x='price', y='pct_change', z='volume',
+                              color='Trend', hover_name='name', size='price',
+                              size_max=16, opacity=0.8, title="Stock Market View")
+        fig3d.update_layout(scene=dict(xaxis_title="Price", yaxis_title="% Change", zaxis_title="Volume"),
+                            template="plotly_dark")
+        st.plotly_chart(fig3d, use_container_width=True)
+    else:
+        st.warning("No stocks available.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("💼 Portfolio")
     if portfolio:
@@ -206,6 +197,7 @@ with col1:
                     st.error(resp.get("detail","Failed to sell"))
     st.markdown("</div>", unsafe_allow_html=True)
 
+# --------- RIGHT PANEL ---------
 with col2:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🏆 Leaderboard")
