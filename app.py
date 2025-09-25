@@ -268,3 +268,4 @@ if articles:
         """, unsafe_allow_html=True)
 else:
     st.info("No news available right now.")
+
