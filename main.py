@@ -110,7 +110,6 @@ def price_update_loop():
             new_price = max(0.01, current_price * (1 + pct))
             run_query("UPDATE stocks SET last_price = price, price = ?, updated_at = ? WHERE symbol = ?",
                       (new_price, int(time.time()), symbol))
-        # No explicit push; frontends will poll endpoints to get updates.
 
 # ---------- Helper: compute pct change ----------
 def row_to_stockout(r):
@@ -205,24 +204,40 @@ def trade(req: TradeReq):
 
 @app.get("/leaderboard")
 def leaderboard():
-    # return teams sorted by portfolio value desc
     teams = run_query("SELECT team,cash,holdings FROM portfolios", fetch=True)
     import json
     stock_prices = {r[0]: r[2] for r in run_query("SELECT symbol,name,price FROM stocks", fetch=True)}
     board = []
-    for team,cash,holdings_json in teams:
+    for team, cash, holdings_json in teams:
         holdings = json.loads(holdings_json) if holdings_json else {}
-        pv = cash
-        for s,q in holdings.items():
-            pv += stock_prices.get(s,0) * q
-        board.append({"team":team,"portfolio_value":round(pv,2)})
-    board.sort(key=lambda x: x["portfolio_value"], reverse=True)
+        total_value = cash
+        for s, q in holdings.items():
+            total_value += stock_prices.get(s, 0) * q
+        board.append({
+            "team": team,
+            "cash": round(cash, 2),
+            "holdings": holdings,
+            "value": round(total_value, 2)  # FIXED: renamed to value
+        })
+    board.sort(key=lambda x: x["value"], reverse=True)
     return board
 
-# ---------- News endpoint ----------
+@app.get("/portfolio_value/{team}")
+def portfolio_value(team: str):
+    rows = run_query("SELECT cash, holdings FROM portfolios WHERE team = ?", (team,), fetch=True)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Team not found")
+    import json
+    cash, holdings_json = rows[0]
+    holdings = json.loads(holdings_json) if holdings_json else {}
+    stock_prices = {r[0]: r[2] for r in run_query("SELECT symbol,name,price FROM stocks", fetch=True)}
+    total_value = cash
+    for s, q in holdings.items():
+        total_value += stock_prices.get(s, 0) * q
+    return {"team": team, "value": round(total_value, 2)}
+
 @app.get("/news")
 def get_news(q: Optional[str] = "stock market"):
-    # Try NewsAPI if key provided
     NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
     if NEWS_API_KEY:
         try:
@@ -234,19 +249,15 @@ def get_news(q: Optional[str] = "stock market"):
             j = r.json()
             articles = [{"title": a["title"], "url": a["url"], "source": a["source"]["name"]} for a in j.get("articles",[])]
             return {"source":"newsapi","articles":articles}
-        except Exception as e:
-            # fallback below
+        except Exception:
             pass
-    # Fallback: Google News RSS search
     try:
         rss_url = f"https://news.google.com/rss/search?q={requests.utils.requote_uri(q)}&hl=en-IN&gl=IN&ceid=IN:en"
         r = requests.get(rss_url, timeout=6)
-        # very light parsing of <item><title>...<link>
         items = []
         txt = r.text
         parts = txt.split("<item>")
         for p in parts[1:9]:
-            # naive parsing
             t = p.split("<title>")[1].split("</title>")[0]
             link = ""
             if "<link>" in p:
