@@ -2,267 +2,216 @@
 import asyncio
 import random
 import time
-from typing import List, Optional
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-import sqlite3
-import threading
-import requests
+from typing import Dict, Optional
+import uvicorn
 import os
+import httpx
 
-DB_FILE = "market.db"
+app = FastAPI(title="Simulated Stock Market API with Admin Features")
 
-app = FastAPI(title="Simulated Stock Market API")
+# --- Config ---
+STARTING_CASH = 100000
+UPDATE_MIN = 60
+UPDATE_MAX = 120
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "supersecret123")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")  # optional
 
-# ---------- DB utilities (simple SQLite) ----------
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS stocks (
-        symbol TEXT PRIMARY KEY,
-        name TEXT,
-        price REAL,
-        last_price REAL,
-        updated_at INTEGER
-    )
-    """)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS portfolios (
-        team TEXT PRIMARY KEY,
-        cash REAL,
-        holdings TEXT, -- json: {"AAPL": qty, ...}
-        last_updated INTEGER
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-def run_query(query, params=(), fetch=False):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute(query, params)
-    if fetch:
-        rows = cur.fetchall()
-        conn.close()
-        return rows
-    conn.commit()
-    conn.close()
-    return None
-
-# ---------- Models ----------
-class StockOut(BaseModel):
+# --- In-memory state ---
+class TickerState(BaseModel):
     symbol: str
     name: str
     price: float
-    last_price: float
-    pct_change: float
-    updated_at: int
+    prev_close: float
+    last_update: float
 
-class TradeReq(BaseModel):
-    team: str
-    symbol: str
-    qty: int  # positive to buy, negative to sell
+tickers: Dict[str, TickerState] = {}
+portfolios: Dict[str, dict] = {}  # id -> {name, cash, holdings}
+injected_news: list = []  # admin news
 
-class CreateTeamReq(BaseModel):
-    team: str
+# Sample tickers
+INITIAL_TICKERS = {
+    "ACME": "Acme Corp",
+    "ORCL": "Oracle-ish",
+    "GLOB": "GloboTech",
+    "NOVA": "Nova Systems",
+    "RIVR": "Riverbank Ltd",
+    "ZENX": "ZenX Labs",
+    "TITN": "Titan Motors",
+    "ASTR": "Astra Foods",
+    "PHAZ": "Phaz Pharma",
+    "SOLA": "Sola Energy"
+}
 
-# ---------- Seed initial stocks ----------
-INITIAL_STOCKS = [
-    ("APPL", "Apple (sim)", 1750.0),
-    ("TSLA", "Tesla (sim)", 2650.0),
-    ("GOGL", "Google (sim)", 2820.0),
-    ("AMZN", "Amazon (sim)", 3300.0),
-    ("INFY", "Infosys (sim)", 1500.0),
-    ("TCS", "TCS (sim)", 3200.0),
-    ("RELI", "Reliance (sim)", 2400.0),
-    ("HDFC", "HDFC Bank (sim)", 1200.0),
-]
+# --- Initialize tickers ---
+def init_tickers():
+    now = time.time()
+    for s, n in INITIAL_TICKERS.items():
+        price = round(random.uniform(50, 500), 2)
+        tickers[s] = TickerState(symbol=s, name=n, price=price, prev_close=price, last_update=now)
+
+# --- Background simulation ---
+async def simulate_ticker(symbol: str):
+    while True:
+        await asyncio.sleep(random.randint(UPDATE_MIN, UPDATE_MAX))
+        t = tickers.get(symbol)
+        if not t: return
+        base_move = random.gauss(0, 0.6)
+        spike = random.random() < 0.03
+        if spike:
+            base_move += random.choice([-1, 1]) * random.uniform(3, 10)
+        pct = base_move / 100.0
+        t.price = round(max(0.01, t.price * (1 + pct)), 2)
+        t.last_update = time.time()
+        tickers[symbol] = t
+
+async def start_simulators():
+    await asyncio.sleep(0.5)
+    tasks = [asyncio.create_task(simulate_ticker(s)) for s in tickers.keys()]
+    await asyncio.gather(*tasks)
 
 @app.on_event("startup")
-def startup():
-    init_db()
-    # seed stocks if not present
-    for sym, name, price in INITIAL_STOCKS:
-        existing = run_query("SELECT symbol FROM stocks WHERE symbol = ?", (sym,), fetch=True)
-        if not existing:
-            run_query("INSERT INTO stocks(symbol,name,price,last_price,updated_at) VALUES (?, ?, ?, ?, ?)",
-                      (sym, name, price, price, int(time.time())))
-    # start background updater thread
-    updater_thread = threading.Thread(target=price_update_loop, daemon=True)
-    updater_thread.start()
+async def startup_event():
+    init_tickers()
+    asyncio.create_task(start_simulators())
 
-# ---------- Background price updater ----------
-def price_update_loop():
-    # This loop runs forever, updating random stocks at random intervals between 60-120s.
-    while True:
-        wait = random.randint(60, 120)
-        time.sleep(wait)
-        # update 2-4 random stocks each cycle
-        rows = run_query("SELECT symbol, price FROM stocks", fetch=True)
-        if not rows:
-            continue
-        count = random.randint(1, max(1, min(4, len(rows))))
-        picks = random.sample(rows, count)
-        for symbol, current_price in picks:
-            # simulate percent move -2%..+2% (tunable)
-            pct = random.uniform(-0.02, 0.02)
-            new_price = max(0.01, current_price * (1 + pct))
-            run_query("UPDATE stocks SET last_price = price, price = ?, updated_at = ? WHERE symbol = ?",
-                      (new_price, int(time.time()), symbol))
+# --- Models ---
+class RegisterIn(BaseModel):
+    name: str
 
-# ---------- Helper: compute pct change ----------
-def row_to_stockout(r):
-    symbol, name, price, last_price, updated_at = r
-    pct = 0.0
-    if last_price and last_price != 0:
-        pct = ((price - last_price) / last_price) * 100.0
-    return {
-        "symbol": symbol,
-        "name": name,
-        "price": round(price, 2),
-        "last_price": round(last_price, 2),
-        "pct_change": round(pct, 2),
-        "updated_at": updated_at
+class TradeIn(BaseModel):
+    portfolio_id: str
+    symbol: str
+    qty: int
+
+# --- Public Endpoints ---
+@app.get("/tickers")
+def get_tickers():
+    return [t.dict() for t in tickers.values()]
+
+@app.get("/prices")
+def get_prices():
+    result = []
+    for t in tickers.values():
+        pct = ((t.price - t.prev_close)/t.prev_close)*100 if t.prev_close else 0
+        result.append({
+            "symbol": t.symbol,
+            "name": t.name,
+            "price": t.price,
+            "prev_close": t.prev_close,
+            "pct_change": round(pct,2),
+            "last_update": t.last_update
+        })
+    return {"timestamp": time.time(), "prices": result}
+
+@app.post("/register")
+def register(r: RegisterIn):
+    pid = f"p{int(time.time()*1000)}{random.randint(1000,9999)}"
+    portfolios[pid] = {
+        "id": pid,
+        "name": r.name,
+        "cash": STARTING_CASH,
+        "holdings": {},
+        "created_at": time.time()
     }
-
-# ---------- Endpoints ----------
-@app.get("/stocks", response_model=List[StockOut])
-def get_stocks():
-    rows = run_query("SELECT symbol,name,price,last_price,updated_at FROM stocks", fetch=True)
-    return [row_to_stockout(r) for r in rows]
-
-@app.post("/init_team")
-def init_team(req: CreateTeamReq):
-    existing = run_query("SELECT team FROM portfolios WHERE team = ?", (req.team,), fetch=True)
-    if existing:
-        raise HTTPException(status_code=400, detail="Team already exists")
-    import json
-    run_query("INSERT INTO portfolios(team,cash,holdings,last_updated) VALUES(?,?,?,?)",
-              (req.team, 100000.0, "{}", int(time.time())))
-    return {"ok": True, "cash": 100000.0}
-
-@app.get("/portfolio/{team}")
-def get_portfolio(team: str):
-    rows = run_query("SELECT cash, holdings FROM portfolios WHERE team = ?", (team,), fetch=True)
-    if not rows:
-        raise HTTPException(status_code=404, detail="Team not found")
-    import json
-    cash, holdings_json = rows[0]
-    holdings = {}
-    if holdings_json:
-        holdings = json.loads(holdings_json)
-    # compute current portfolio value
-    stock_rows = {r[0]: r[2] for r in run_query("SELECT symbol,name,price FROM stocks", fetch=True)}
-    pv = cash
-    holdings_detail = {}
-    for sym, qty in holdings.items():
-        price = stock_rows.get(sym, 0)
-        value = price * qty
-        holdings_detail[sym] = {"qty": qty, "price": price, "value": round(value, 2)}
-        pv += value
-    return {"team": team, "cash": round(cash,2), "holdings": holdings_detail, "portfolio_value": round(pv,2)}
+    return portfolios[pid]
 
 @app.post("/trade")
-def trade(req: TradeReq):
-    team = req.team
-    sym = req.symbol
-    qty = req.qty
-    if qty == 0:
-        raise HTTPException(status_code=400, detail="qty cannot be 0")
-    # fetch stock price
-    row = run_query("SELECT price FROM stocks WHERE symbol = ?", (sym,), fetch=True)
-    if not row:
-        raise HTTPException(status_code=404, detail="Stock not found")
-    price = row[0][0]
-    total = price * abs(qty)
-    import json
-    p = run_query("SELECT cash, holdings FROM portfolios WHERE team = ?", (team,), fetch=True)
-    if not p:
-        raise HTTPException(status_code=404, detail="Team not found")
-    cash, holdings_json = p[0]
-    holdings = json.loads(holdings_json) if holdings_json else {}
-    if qty > 0:
-        # buy
-        if cash < total:
+def trade(t: TradeIn):
+    if t.portfolio_id not in portfolios:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    if t.symbol not in tickers:
+        raise HTTPException(status_code=404, detail="Ticker not found")
+    p = portfolios[t.portfolio_id]
+    price = tickers[t.symbol].price
+    total = round(price * abs(t.qty), 2)
+
+    if t.qty > 0:  # buy
+        if p["cash"] < total:
             raise HTTPException(status_code=400, detail="Insufficient cash")
-        cash -= total
-        holdings[sym] = holdings.get(sym, 0) + qty
-    else:
-        # sell - ensure qty available
-        need = abs(qty)
-        have = holdings.get(sym, 0)
-        if have < need:
-            raise HTTPException(status_code=400, detail="Insufficient holdings to sell")
-        holdings[sym] = have - need
-        if holdings[sym] == 0:
-            del holdings[sym]
-        cash += total
-    run_query("UPDATE portfolios SET cash = ?, holdings = ?, last_updated = ? WHERE team = ?",
-              (cash, json.dumps(holdings), int(time.time()), team))
-    return {"ok": True, "cash": round(cash,2), "holdings": holdings}
+        p["cash"] -= total
+        p["holdings"][t.symbol] = p["holdings"].get(t.symbol,0) + t.qty
+    else:  # sell
+        available = p["holdings"].get(t.symbol,0)
+        need = abs(t.qty)
+        if available < need:
+            raise HTTPException(status_code=400, detail="Insufficient holdings")
+        p["holdings"][t.symbol] = available - need
+        p["cash"] += total
+        if p["holdings"][t.symbol]==0:
+            del p["holdings"][t.symbol]
+    portfolios[t.portfolio_id] = p
+    return {"status": "ok", "portfolio": p}
+
+@app.get("/portfolio/{pid}")
+def get_portfolio(pid: str):
+    if pid not in portfolios:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    p = portfolios[pid].copy()
+    holdings_detail=[]
+    total_holdings_value=0
+    for sym, qty in p["holdings"].items():
+        price = tickers[sym].price
+        val = round(price*qty,2)
+        holdings_detail.append({"symbol": sym, "qty": qty, "price": price, "value": val})
+        total_holdings_value += val
+    p["holdings_detail"]=holdings_detail
+    p["holdings_value"]=round(total_holdings_value,2)
+    p["total_value"]=round(p["cash"]+total_holdings_value,2)
+    return p
 
 @app.get("/leaderboard")
-def leaderboard():
-    teams = run_query("SELECT team,cash,holdings FROM portfolios", fetch=True)
-    import json
-    stock_prices = {r[0]: r[2] for r in run_query("SELECT symbol,name,price FROM stocks", fetch=True)}
-    board = []
-    for team, cash, holdings_json in teams:
-        holdings = json.loads(holdings_json) if holdings_json else {}
-        total_value = cash
-        for s, q in holdings.items():
-            total_value += stock_prices.get(s, 0) * q
-        board.append({
-            "team": team,
-            "cash": round(cash, 2),
-            "holdings": holdings,
-            "value": round(total_value, 2)  # FIXED: renamed to value
-        })
-    board.sort(key=lambda x: x["value"], reverse=True)
-    return board
-
-@app.get("/portfolio_value/{team}")
-def portfolio_value(team: str):
-    rows = run_query("SELECT cash, holdings FROM portfolios WHERE team = ?", (team,), fetch=True)
-    if not rows:
-        raise HTTPException(status_code=404, detail="Team not found")
-    import json
-    cash, holdings_json = rows[0]
-    holdings = json.loads(holdings_json) if holdings_json else {}
-    stock_prices = {r[0]: r[2] for r in run_query("SELECT symbol,name,price FROM stocks", fetch=True)}
-    total_value = cash
-    for s, q in holdings.items():
-        total_value += stock_prices.get(s, 0) * q
-    return {"team": team, "value": round(total_value, 2)}
+def get_leaderboard(limit:int=10):
+    board=[]
+    for p in portfolios.values():
+        total = p["cash"]
+        for sym,qty in p["holdings"].items():
+            total += tickers[sym].price*qty
+        board.append({"id":p["id"],"name":p["name"],"total":round(total,2)})
+    board.sort(key=lambda x:x["total"],reverse=True)
+    return board[:limit]
 
 @app.get("/news")
-def get_news(q: Optional[str] = "stock market"):
-    NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
-    if NEWS_API_KEY:
-        try:
-            r = requests.get(
-                "https://newsapi.org/v2/everything",
-                params={"q": q, "pageSize": 8, "apiKey": NEWS_API_KEY, "sortBy": "publishedAt", "language": "en"},
-                timeout=8
-            )
-            j = r.json()
-            articles = [{"title": a["title"], "url": a["url"], "source": a["source"]["name"]} for a in j.get("articles",[])]
-            return {"source":"newsapi","articles":articles}
-        except Exception:
-            pass
-    try:
-        rss_url = f"https://news.google.com/rss/search?q={requests.utils.requote_uri(q)}&hl=en-IN&gl=IN&ceid=IN:en"
-        r = requests.get(rss_url, timeout=6)
-        items = []
-        txt = r.text
-        parts = txt.split("<item>")
-        for p in parts[1:9]:
-            t = p.split("<title>")[1].split("</title>")[0]
-            link = ""
-            if "<link>" in p:
-                link = p.split("<link>")[1].split("</link>")[0]
-            items.append({"title": t, "url": link})
-        return {"source":"google_rss","articles":items}
-    except Exception as e:
-        return {"source":"none","articles":[], "error": str(e)}
+async def get_news(symbols: Optional[str]=None, q: Optional[str]=None):
+    query = q or symbols or "stock market"
+    articles = []
+    # include last 5 admin-injected news
+    if injected_news:
+        articles.extend(injected_news[-5:])
+    if NEWSAPI_KEY:
+        url = "https://newsapi.org/v2/everything"
+        params = {"q":query,"pageSize":8,"sortBy":"publishedAt","language":"en","apiKey":NEWSAPI_KEY}
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code==200:
+                j = resp.json()
+                real_articles=[{"title":a.get("title"),"url":a.get("url"),"source":a.get("source",{}).get("name"),"publishedAt":a.get("publishedAt"),"description":a.get("description")} for a in j.get("articles",[])]
+                articles.extend(real_articles[:5])
+            else:
+                articles.append({"title":f"Error fetching news: {resp.status_code}","source":"NewsAPI"})
+    else:
+        articles.append({"title":f"{query}: Market reacts to news","source":"SimNews","publishedAt":time.ctime()})
+    return {"query":query,"articles":articles[-8:]}
+
+# --- Admin Endpoints ---
+@app.post("/admin/reset")
+def admin_reset(secret: str = Query(...)):
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid admin secret")
+    init_tickers()
+    portfolios.clear()
+    injected_news.clear()
+    return {"status":"reset_done","message":"Market, portfolios, and news cleared"}
+
+@app.post("/admin/news")
+def admin_news(title: str, description: str="", source: str="Admin", secret: str = Query(...)):
+    if secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid admin secret")
+    article = {"title":title,"description":description,"source":source,"publishedAt":time.ctime()}
+    injected_news.append(article)
+    return {"status":"ok","article":article}
+
+# --- Run server locally ---
+if __name__=="__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
