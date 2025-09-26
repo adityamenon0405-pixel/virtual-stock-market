@@ -4,7 +4,6 @@ import requests
 import os
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import time
 from datetime import datetime
 
@@ -12,20 +11,18 @@ from datetime import datetime
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
 
 # ---------- AUTO REFRESH ----------
-st_autorefresh(interval=1000, key="auto_refresh")
+st_autorefresh(interval=1000, key="auto_refresh")  # refresh every 1 sec
 
 # ---------- BACKEND URL ----------
 BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.com")
 
 # ---------- SESSION STATE ----------
-if "team" not in st.session_state:
-    st.session_state.team = None
-if "round_start" not in st.session_state:
-    st.session_state.round_start = None  # set when organizer starts
-if "paused" not in st.session_state:
-    st.session_state.paused = False
-if "pause_time" not in st.session_state:
-    st.session_state.pause_time = 0
+for key in ["team", "round_start", "paused", "pause_time", "buy_clicked", "sell_clicked"]:
+    if key not in st.session_state:
+        if key in ["buy_clicked", "sell_clicked", "paused"]:
+            st.session_state[key] = False
+        else:
+            st.session_state[key] = None if key=="team" or key=="round_start" else 0
 
 ROUND_DURATION = 15 * 60  # 15 minutes
 
@@ -35,7 +32,7 @@ def safe_get(url, timeout=5):
         r = requests.get(url, timeout=timeout)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except:
         return None
 
 def fetch_stocks():
@@ -55,7 +52,7 @@ def init_team(team):
         r = requests.post(f"{BACKEND}/init_team", json={"team": team})
         if r.status_code == 200:
             return r.json()
-    except Exception:
+    except:
         return None
     return None
 
@@ -64,18 +61,16 @@ def trade(team, symbol, qty):
         r = requests.post(f"{BACKEND}/trade", json={"team": team, "symbol": symbol, "qty": qty})
         if r.status_code == 200:
             return r.json()
-    except Exception:
+    except:
         return None
     return None
 
-# ---------- TEAM REGISTRATION FIRST ----------
+# ---------- TEAM REGISTRATION ----------
 if st.session_state.team is None:
     st.title("👥 Register or Login Your Team")
     team_name_input = st.text_input("Enter Team Name")
     if st.button("Continue"):
-        if team_name_input.strip() == "":
-            st.warning("Please enter a valid team name.")
-        else:
+        if team_name_input.strip():
             res = init_team(team_name_input)
             if res:
                 st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
@@ -87,11 +82,11 @@ if st.session_state.team is None:
                     st.session_state.team = team_name_input
                 else:
                     st.error("Error occurred. Try another team name.")
-    st.stop()
+    st.stop()  # stop here until team is set
 
 team_name = st.session_state.team
 
-# ---------- ORGANIZER PANEL ----------
+# ---------- ORGANIZER CONTROLS ----------
 with st.expander("⚙️ Organizer Controls"):
     st.write("Control the round timer here.")
     col1, col2, col3 = st.columns(3)
@@ -176,17 +171,11 @@ if portfolio:
     # ---------- TRADE ----------
     st.subheader("💸 Place Trade")
     if stocks:
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+        col1, col2, col3, col4 = st.columns([2,2,1,1])
         with col1:
             selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
         with col2:
             qty = st.number_input("Quantity", min_value=1, step=1, value=1)
-
-        if "buy_clicked" not in st.session_state:
-            st.session_state.buy_clicked = False
-        if "sell_clicked" not in st.session_state:
-            st.session_state.sell_clicked = False
-
         with col3:
             if st.button("Buy"):
                 st.session_state.buy_clicked = True
@@ -221,24 +210,14 @@ if stocks:
     st.subheader("📊 Live Stock Prices")
     df = pd.DataFrame(stocks)
     df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]]
-                 .rename(columns={"symbol": "Symbol", "name": "Company", "price": "Price", "pct_change": "% Change"}),
-                 use_container_width=True)
+    st.dataframe(df[["symbol","name","price","pct_change","Trend"]]
+                 .rename(columns={"symbol":"Symbol","name":"Company","price":"Price","pct_change":"% Change"}), use_container_width=True)
 
-    # Attractive 3D Chart
-    df['volume'] = [i * 1000 for i in range(1, len(df) + 1)]
-    fig3d = px.scatter_3d(
-        df, x='price', y='pct_change', z='volume',
-        color='Trend', hover_name='name', size='price',
-        size_max=18, opacity=0.8,
-        title='Stock Price vs % Change vs Volume'
-    )
-    fig3d.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-    fig3d.update_layout(scene=dict(
-        xaxis_title="Price",
-        yaxis_title="% Change",
-        zaxis_title="Volume"
-    ), margin=dict(l=0, r=0, b=0, t=30))
+    # 3D Chart
+    df['volume'] = [i*1000 for i in range(1,len(df)+1)]
+    fig3d = px.scatter_3d(df, x='price', y='pct_change', z='volume', color='Trend', hover_name='name', size='price', size_max=18, opacity=0.8)
+    fig3d.update_traces(marker=dict(line=dict(width=1,color='DarkSlateGrey')))
+    fig3d.update_layout(scene=dict(xaxis_title="Price", yaxis_title="% Change", zaxis_title="Volume"), margin=dict(l=0,r=0,b=0,t=30))
     st.plotly_chart(fig3d, use_container_width=True)
 else:
     st.warning("No stock data available right now.")
@@ -246,22 +225,14 @@ else:
 # ---------- LEADERBOARD ----------
 st.subheader("🏆 Live Leaderboard")
 if leaderboard:
-    ldf = pd.DataFrame(leaderboard).sort_values("value", ascending=False).reset_index(drop=True)
+    ldf = pd.DataFrame(leaderboard).sort_values("value",ascending=False).reset_index(drop=True)
     ldf.index += 1
-
     def highlight_top3(row):
-        if row.name == 1:
-            return ['background-color: gold; font-weight: bold'] * len(row)
-        elif row.name == 2:
-            return ['background-color: silver; font-weight: bold'] * len(row)
-        elif row.name == 3:
-            return ['background-color: #cd7f32; font-weight: bold'] * len(row)
-        else:
-            return [''] * len(row)
-
-    styled_df = ldf.style.apply(highlight_top3, axis=1)
-
-    st.dataframe(styled_df, use_container_width=True, hide_index=False)
+        if row.name==1: return ['background-color: gold; font-weight:bold']*len(row)
+        elif row.name==2: return ['background-color: silver; font-weight:bold']*len(row)
+        elif row.name==3: return ['background-color: #cd7f32; font-weight:bold']*len(row)
+        else: return ['']*len(row)
+    st.dataframe(ldf.style.apply(highlight_top3, axis=1), use_container_width=True, hide_index=False)
 else:
     st.info("No teams yet. Waiting for participants to trade...")
 
@@ -269,15 +240,12 @@ else:
 st.subheader("📰 Market News")
 if news and "articles" in news and news["articles"]:
     for article in news["articles"]:
-        st.markdown(
-            f"""
-            <div style='background-color:white;padding:10px;margin-bottom:8px;border-radius:8px;
-            box-shadow:0 2px 6px rgba(0,0,0,0.1)'>
-                <b><a href="{article['url']}" target="_blank">{article['title']}</a></b><br>
-                <span style="color:gray;font-size:12px;">{datetime.now().strftime('%H:%M:%S')}</span>
-            </div>
-            """, unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div style='background-color:white;padding:10px;margin-bottom:8px;border-radius:8px;
+        box-shadow:0 2px 6px rgba(0,0,0,0.1)'>
+            <b><a href="{article['url']}" target="_blank">{article['title']}</a></b><br>
+            <span style="color:gray;font-size:12px;">{datetime.now().strftime('%H:%M:%S')}</span>
+        </div>
+        """, unsafe_allow_html=True)
 else:
-    st.info("No news available right now.") This code is not getting loaded in streamlit
-
+    st.info("No news available right now.")
