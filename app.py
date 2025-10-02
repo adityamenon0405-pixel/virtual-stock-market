@@ -4,12 +4,31 @@ import requests
 import os
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import time
-from datetime import datetime
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(page_title="📈 Virtual Stock Market", layout="wide")
+
+# ---------- CUSTOM STYLES ----------
+st.markdown("""
+    <style>
+    body {
+        background-color: #f8f9f9;
+    }
+    .timer-box {
+        background: #ffffff;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0px 4px 12px rgba(0,0,0,0.1);
+        margin: 15px 0;
+        text-align: center;
+    }
+    .stDataFrame {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ---------- AUTO REFRESH ----------
 st_autorefresh(interval=1000, key="auto_refresh")
@@ -21,7 +40,7 @@ BACKEND = os.environ.get("BACKEND", "https://virtual-stock-market-7mxp.onrender.
 if "team" not in st.session_state:
     st.session_state.team = None
 if "round_start" not in st.session_state:
-    st.session_state.round_start = None  # set when organizer starts
+    st.session_state.round_start = None
 if "paused" not in st.session_state:
     st.session_state.paused = False
 if "pause_time" not in st.session_state:
@@ -38,17 +57,8 @@ def safe_get(url, timeout=5):
     except Exception:
         return None
 
-def fetch_stocks():
-    return safe_get(f"{BACKEND}/stocks")
-
-def fetch_leaderboard():
-    return safe_get(f"{BACKEND}/leaderboard")
-
-def fetch_news():
-    return safe_get(f"{BACKEND}/news")
-
-def fetch_portfolio(team):
-    return safe_get(f"{BACKEND}/portfolio/{team}")
+def fetch_data(endpoint):
+    return safe_get(f"{BACKEND}/{endpoint}")
 
 def init_team(team):
     try:
@@ -68,7 +78,41 @@ def trade(team, symbol, qty):
         return None
     return None
 
-# ---------- TEAM REGISTRATION FIRST ----------
+# ---------- ORGANIZER CONTROLS (Password Protected) ----------
+st.sidebar.subheader("🔒 Organizer Access")
+admin_pass = st.sidebar.text_input("Enter Organizer Password", type="password")
+
+if admin_pass == "secret123":  # change this to your own password
+    with st.sidebar.expander("⚙️ Organizer Controls", expanded=True):
+        st.write("Control the round timer here.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("▶️ Start Round"):
+                st.session_state.round_start = time.time()
+                st.session_state.paused = False
+                st.success("✅ Round started.")
+        with col2:
+            if st.button("⏸ Pause Round"):
+                if st.session_state.round_start and not st.session_state.paused:
+                    st.session_state.paused = True
+                    st.session_state.pause_time = time.time()
+                    st.info("⏸ Round paused.")
+        with col3:
+            if st.button("🔄 Resume Round"):
+                if st.session_state.paused:
+                    paused_duration = time.time() - st.session_state.pause_time
+                    st.session_state.round_start += paused_duration
+                    st.session_state.paused = False
+                    st.success("▶️ Round resumed.")
+        if st.button("♻️ Reset Round"):
+            st.session_state.round_start = None
+            st.session_state.paused = False
+            st.session_state.pause_time = 0
+            st.warning("Round reset. You must start again.")
+else:
+    st.sidebar.info("Organizer controls hidden. Enter password to unlock.")
+
+# ---------- REGISTRATION FIRST ----------
 if st.session_state.team is None:
     st.title("👥 Register or Login Your Team")
     team_name_input = st.text_input("Enter Team Name")
@@ -78,46 +122,18 @@ if st.session_state.team is None:
         else:
             res = init_team(team_name_input)
             if res:
-                st.success(f"Team '{team_name_input}' created with ₹{res['cash']:.2f}")
+                st.success(f"✅ Team '{team_name_input}' created with ₹{res['cash']:.2f}")
                 st.session_state.team = team_name_input
             else:
-                port = fetch_portfolio(team_name_input)
+                port = fetch_data(f"portfolio/{team_name_input}")
                 if port:
                     st.info(f"Team '{team_name_input}' logged in successfully.")
                     st.session_state.team = team_name_input
                 else:
-                    st.error("Error occurred. Try another team name.")
+                    st.error("⚠️ Error occurred. Try another team name.")
     st.stop()
 
 team_name = st.session_state.team
-
-# ---------- ORGANIZER PANEL ----------
-with st.expander("⚙️ Organizer Controls"):
-    st.write("Control the round timer here.")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("▶️ Start Round"):
-            st.session_state.round_start = time.time()
-            st.session_state.paused = False
-            st.success("✅ Round started.")
-    with col2:
-        if st.button("⏸ Pause Round"):
-            if st.session_state.round_start and not st.session_state.paused:
-                st.session_state.paused = True
-                st.session_state.pause_time = time.time()
-                st.info("⏸ Round paused.")
-    with col3:
-        if st.button("🔄 Resume Round"):
-            if st.session_state.paused:
-                paused_duration = time.time() - st.session_state.pause_time
-                st.session_state.round_start += paused_duration
-                st.session_state.paused = False
-                st.success("▶️ Round resumed.")
-    if st.button("♻️ Reset Round"):
-        st.session_state.round_start = None
-        st.session_state.paused = False
-        st.session_state.pause_time = 0
-        st.warning("Round reset. You must start again.")
 
 # ---------- TIMER ----------
 if st.session_state.round_start:
@@ -141,142 +157,137 @@ if st.session_state.round_start:
 
     if remaining <= 0:
         trading_allowed = False
-        st.markdown("<h2 style='text-align:center; color:red;'>⏹️ Trading round has ended!</h2>", unsafe_allow_html=True)
+        st.markdown("<div class='timer-box'><h2 style='color:red;'>⏹️ Trading round has ended!</h2></div>", unsafe_allow_html=True)
     else:
         trading_allowed = True
         if blink:
             st.markdown(f"""
-                <h1 style='text-align:center; color:{color};
-                animation: blinker 1s linear infinite;'>{mins:02d}:{secs:02d}</h1>
+                <div class='timer-box'>
+                <h1 style='color:{color}; animation: blinker 1s linear infinite;'>
+                ⏱️ {mins:02d}:{secs:02d}</h1>
                 <style>@keyframes blinker {{ 50% {{ opacity: 0; }} }}</style>
+                </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown(f"<h1 style='text-align:center; color:{color};'>⏱️ {mins:02d}:{secs:02d}</h1>", unsafe_allow_html=True)
+            st.markdown(f"<div class='timer-box'><h1 style='color:{color};'>⏱️ {mins:02d}:{secs:02d}</h1></div>", unsafe_allow_html=True)
 else:
     trading_allowed = False
-    st.markdown("<h3 style='text-align:center; color:orange;'>⌛ Waiting for round to start...</h3>", unsafe_allow_html=True)
+    st.markdown("<div class='timer-box'><h3 style='color:orange;'>⌛ Waiting for round to start...</h3></div>", unsafe_allow_html=True)
 
 # ---------- FETCH DATA ----------
-stocks = fetch_stocks()
-leaderboard = fetch_leaderboard()
-news = fetch_news()
-portfolio = fetch_portfolio(team_name)
+stocks = fetch_data("stocks")
+leaderboard = fetch_data("leaderboard")
+news = fetch_data("news")
+portfolio = fetch_data(f"portfolio/{team_name}")
 
 # ---------- PORTFOLIO ----------
+st.header("💼 Your Portfolio")
 if portfolio:
-    st.subheader("💼 Portfolio")
-    st.metric("Available Cash", f"₹{portfolio['cash']:.2f}")
+    st.markdown(f"""
+        <div class="timer-box" style="background:#eaf2f8;">
+            <h3>Available Cash: 💵 ₹{portfolio['cash']:.2f}</h3>
+        </div>
+    """, unsafe_allow_html=True)
 
     if portfolio["holdings"]:
         holdings_df = pd.DataFrame.from_dict(portfolio["holdings"], orient="index")
-        st.dataframe(holdings_df, use_container_width=True)
+        st.dataframe(
+            holdings_df.style.background_gradient(cmap="Blues"),
+            use_container_width=True
+        )
     else:
-        st.info("No holdings yet. Buy some stocks!")
+        st.info("📌 No holdings yet. Buy some stocks!")
+else:
+    st.warning("⚠️ Portfolio not found.")
 
-    # ---------- TRADE ----------
+# ---------- TRADE ----------
+if stocks:
     st.subheader("💸 Place Trade")
-    if stocks:
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
-        with col1:
-            selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
-        with col2:
-            qty = st.number_input("Quantity", min_value=1, step=1, value=1)
-
-        if "buy_clicked" not in st.session_state:
-            st.session_state.buy_clicked = False
-        if "sell_clicked" not in st.session_state:
-            st.session_state.sell_clicked = False
-
-        with col3:
-            if st.button("Buy"):
-                st.session_state.buy_clicked = True
-        with col4:
-            if st.button("Sell"):
-                st.session_state.sell_clicked = True
-
-        if st.session_state.buy_clicked:
+    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+    with col1:
+        selected_stock = st.selectbox("Select Stock", [s["symbol"] for s in stocks])
+    with col2:
+        qty = st.number_input("Quantity", min_value=1, step=1, value=1)
+    with col3:
+        if st.button("Buy"):
             if trading_allowed:
                 res = trade(team_name, selected_stock, int(qty))
                 if res:
                     st.success(f"✅ Bought {qty} of {selected_stock}")
                 else:
-                    st.error("Failed to buy. Check cash balance.")
+                    st.error("❌ Failed to buy. Check balance.")
             else:
                 st.warning("Trading round has ended!")
-            st.session_state.buy_clicked = False
-
-        if st.session_state.sell_clicked:
+    with col4:
+        if st.button("Sell"):
             if trading_allowed:
                 res = trade(team_name, selected_stock, -int(qty))
                 if res:
                     st.success(f"✅ Sold {qty} of {selected_stock}")
                 else:
-                    st.error("Failed to sell. Check holdings.")
+                    st.error("❌ Failed to sell. Check holdings.")
             else:
                 st.warning("Trading round has ended!")
-            st.session_state.sell_clicked = False
 
 # ---------- STOCKS ----------
+st.header("📊 Live Stock Prices")
 if stocks:
-    st.subheader("📊 Live Stock Prices")
     df = pd.DataFrame(stocks)
     df["Trend"] = df["pct_change"].apply(lambda x: "🟢" if x >= 0 else "🔴")
-    st.dataframe(df[["symbol", "name", "price", "pct_change", "Trend"]]
-                 .rename(columns={"symbol": "Symbol", "name": "Company", "price": "Price", "pct_change": "% Change"}),
-                 use_container_width=True)
+    st.dataframe(
+        df[["symbol", "name", "price", "pct_change", "Trend"]]
+        .rename(columns={"symbol": "Symbol", "name": "Company", "price": "Price", "pct_change": "% Change"}),
+        use_container_width=True
+    )
 
-    # Attractive 3D Chart
+    # 3D Chart (Attractive)
     df['volume'] = [i * 1000 for i in range(1, len(df) + 1)]
     fig3d = px.scatter_3d(
-        df, x='price', y='pct_change', z='volume',
-        color='Trend', hover_name='name', size='price',
-        size_max=18, opacity=0.8,
-        title='Stock Price vs % Change vs Volume'
+        df, x='price', y='pct_change', z='volume', color='Trend',
+        hover_name='name', size='price', size_max=20,
+        title='💹 Stock Price vs % Change vs Volume'
     )
-    fig3d.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
     fig3d.update_layout(scene=dict(
-        xaxis_title="Price",
-        yaxis_title="% Change",
-        zaxis_title="Volume"
-    ), margin=dict(l=0, r=0, b=0, t=30))
+        xaxis_title='Price',
+        yaxis_title='% Change',
+        zaxis_title='Volume',
+        bgcolor="rgba(240,248,255,0.8)"
+    ))
     st.plotly_chart(fig3d, use_container_width=True)
 else:
-    st.warning("No stock data available right now.")
+    st.warning("⚠️ No stock data available.")
 
 # ---------- LEADERBOARD ----------
-st.subheader("🏆 Live Leaderboard")
+st.header("🏆 Live Leaderboard")
 if leaderboard:
     ldf = pd.DataFrame(leaderboard).sort_values("value", ascending=False).reset_index(drop=True)
     ldf.index += 1
 
-    def highlight_top3(row):
+    def highlight_top(row):
         if row.name == 1:
-            return ['background-color: gold; font-weight: bold'] * len(row)
+            return ['background-color: gold; font-weight: bold;'] * len(row)
         elif row.name == 2:
-            return ['background-color: silver; font-weight: bold'] * len(row)
+            return ['background-color: silver; font-weight: bold;'] * len(row)
         elif row.name == 3:
-            return ['background-color: #cd7f32; font-weight: bold'] * len(row)
-        else:
-            return [''] * len(row)
+            return ['background-color: #cd7f32; font-weight: bold;'] * len(row)
+        return [''] * len(row)
 
-    styled_df = ldf.style.apply(highlight_top3, axis=1)
+    styled_ldf = ldf.style.apply(highlight_top, axis=1).background_gradient(cmap="Greens")
 
-    st.dataframe(styled_df, use_container_width=True, hide_index=False)
+    st.markdown("""
+        <div class="timer-box" style="background:#fef9e7;">
+            <h3>📊 Current Rankings</h3>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.dataframe(styled_ldf, use_container_width=True, hide_index=False)
 else:
-    st.info("No teams yet. Waiting for participants to trade...")
+    st.info("⚠️ No leaderboard data yet.")
 
 # ---------- NEWS ----------
-st.subheader("📰 Market News")
+st.header("📰 Market News")
 if news and "articles" in news and news["articles"]:
     for article in news["articles"]:
-        st.markdown(
-            f"""
-            <div style='background-color:white;padding:10px;margin-bottom:8px;border-radius:8px;
-            box-shadow:0 2px 6px rgba(0,0,0,0.1)'>
-                <b><a href="{article['url']}" target="_blank">{article['title']}</a></b><br>
-                <span style="color:gray;font-size:12px;">{datetime.now().strftime('%H:%M:%S')}</span>
-            </div>
-            """, unsafe_allow_html=True
-        )
+        st.markdown(f"🔗 [{article['title']}]({article['url']})")
 else:
-    st.info("No news available right now.")
+    st.info("⚠️ No news available right now.")
