@@ -10,7 +10,7 @@ import plotly.express as px
 st.set_page_config(page_title="📈 Virtual Stock Market - Round 2", layout="wide")
 
 # ---------------- GLOBAL SETTINGS ----------------
-BACKEND = "http://127.0.0.1:8000"  # Replace with your backend if available
+BACKEND = "https://virtual-stock-market-7mxp.onrender.com"  # Updated backend URL
 ROUND_DURATION = 15 * 60           # 15 minutes per round
 REFRESH_INTERVAL_MS = 1000         # 1 second refresh
 
